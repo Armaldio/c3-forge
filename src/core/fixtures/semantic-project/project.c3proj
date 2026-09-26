@@ -1,0 +1,14 @@
+{
+  "name": "Construct Semantic Fixture",
+  "savedWithRelease": "Construct 3 r415",
+  "objectTypes": {
+    "items": [],
+    "subfolders": [{ "name": "Actors", "items": ["Player"], "subfolders": [] }]
+  },
+  "families": { "items": ["Combatants"], "subfolders": [] },
+  "layouts": { "items": ["Battle"], "subfolders": [] },
+  "eventSheets": {
+    "items": ["Globals"],
+    "subfolders": [{ "name": "Gameplay", "items": ["Combat"], "subfolders": [] }]
+  }
+}

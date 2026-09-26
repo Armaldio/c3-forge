@@ -41,6 +41,18 @@ export interface EntityIdentityConflict {
 export type ReferenceConfidence = 'high' | 'medium' | 'low';
 export type ReferenceSource = 'semantic' | 'construct-expression' | 'exact-string-fallback';
 
+export interface ReferenceSourceLocation {
+  readonly eventSid?: string;
+  readonly functionSid?: string;
+  /** JSONPath-like path to the event that owns this occurrence. */
+  readonly eventPath?: string;
+  /** JSONPath-like path to the referenced field or expression. */
+  readonly jsonPath?: string;
+  readonly entryKind?: 'condition' | 'action';
+  readonly entryIndex?: number;
+  readonly expressionRange?: { readonly start: number; readonly end: number };
+}
+
 export interface ProjectReference {
   readonly id: string;
   readonly sourceEntityId?: string;
@@ -51,6 +63,21 @@ export interface ProjectReference {
   readonly relationship: string;
   readonly confidence: ReferenceConfidence;
   readonly source: ReferenceSource;
+  readonly sourceLocation?: ReferenceSourceLocation;
+}
+
+/** A derived graph edge that points back to all of its source occurrences. */
+export interface ProjectDependency {
+  readonly id: string;
+  readonly sourceEntityId?: string;
+  readonly sourcePath: string;
+  readonly targetEntityId?: string;
+  readonly targetName: string;
+  readonly targetKind?: EntityKind;
+  readonly relationship: string;
+  readonly confidence: ReferenceConfidence;
+  readonly source: ReferenceSource;
+  readonly occurrenceIds: readonly string[];
 }
 
 export type DiagnosticSeverity = 'error' | 'warning' | 'info';
@@ -110,8 +137,10 @@ export interface ProjectAnalysis {
   readonly manifest: ProjectManifest;
   readonly index: ProjectIndex;
   readonly references: readonly ProjectReference[];
+  readonly referencesBySource: ReadonlyMap<string, readonly ProjectReference[]>;
+  readonly referencesByTarget: ReadonlyMap<string, readonly ProjectReference[]>;
+  readonly dependencies: readonly ProjectDependency[];
   readonly diagnostics: readonly ProjectDiagnostic[];
-  readonly resourceIssues: readonly ResourceIssue[];
   readonly stats: AnalysisStats;
 }
 

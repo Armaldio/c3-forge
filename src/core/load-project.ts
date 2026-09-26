@@ -3,7 +3,7 @@ import { createAnalysisStats, createProjectDiagnostics } from './diagnostics';
 import { entityForProjectFile } from './entities';
 import { parseProjectManifestResult, type ManifestParseResult } from './manifest';
 import { createProjectIndex } from './project-index';
-import { extractProjectReferences } from './references';
+import { createProjectDependencies, createReferenceIndexes, extractProjectReferences } from './references';
 import { loadManifestResources } from './resources';
 import type { ProjectAnalysis, ProjectLoadOptions, ProjectLoadStage, ResourceIssue } from './types';
 
@@ -58,6 +58,8 @@ export async function loadProject(filesystem: ProjectFileSystem, options?: Proje
 
   report(options, 'references');
   const references = extractProjectReferences(loaded.resources, index);
+  const referenceIndexes = createReferenceIndexes(references);
+  const dependencies = createProjectDependencies(references);
 
   report(options, 'diagnostics');
   const diagnostics = createProjectDiagnostics(index, references, allIssues);
@@ -68,8 +70,9 @@ export async function loadProject(filesystem: ProjectFileSystem, options?: Proje
     manifest: parsedManifest.manifest,
     index,
     references,
+    ...referenceIndexes,
+    dependencies,
     diagnostics,
-    resourceIssues: allIssues,
     stats,
   };
 }

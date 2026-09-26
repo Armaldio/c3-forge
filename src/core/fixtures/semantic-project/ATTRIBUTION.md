@@ -1,0 +1,5 @@
+# Semantic fixture provenance
+
+This is a compact test project, not a copied game. Its `project.c3proj` folder tree and event JSON use Construct's documented project organization and serialized field names. The function block, parameter, nested variable, and System event action shapes are adapted from real Construct event clipboard data shared in [Scirra/Construct-bugs issue 6805](https://github.com/Scirra/Construct-bugs/issues/6805).
+
+The variable-scope assertions follow the [Construct 3 event variables manual](https://www.construct.net/en/make-games/manuals/construct-3/project-primitives/events/variables) and [functions manual](https://www.construct.net/en/make-games/manuals/construct-3/project-primitives/events/functions). Construct notes that the project format has no published complete specification and may change; these fixtures exercise observed structures rather than claiming exhaustive format coverage. See [Construct's project format guide](https://www.construct.net/en/tutorials/constructs-project-format-3275).

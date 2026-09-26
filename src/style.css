@@ -775,7 +775,35 @@ code {
   border-top: 1px solid var(--line-soft);
 }
 
-.reference-group h4 {
+.reference-confidence-section {
+  margin-top: 9px;
+}
+
+.reference-confidence-title {
+  margin: 0;
+  padding: 5px 0 3px;
+  color: #c8d1d8;
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.reference-confidence-section[data-confidence='possible'] {
+  margin-top: 14px;
+  padding-top: 8px;
+  border-top: 1px dashed #665b40;
+}
+
+.reference-confidence-section[data-confidence='possible'] .reference-confidence-title {
+  color: #d0b77c;
+}
+
+.reference-confidence-note {
+  margin: 0 0 5px;
+  color: #aa9a72;
+  font-size: 9px;
+}
+
+.reference-group h5 {
   overflow: hidden;
   margin: 0;
   padding: 7px 0 4px;
@@ -786,7 +814,7 @@ code {
   white-space: nowrap;
 }
 
-.reference-group h4 span {
+.reference-group h5 span {
   display: block;
   overflow: hidden;
   margin-top: 1px;
@@ -839,12 +867,17 @@ code {
 }
 
 .reference-path,
+.reference-location,
 .reference-source-tag {
   overflow: hidden;
   color: var(--text-dim);
   font: 8px/1.4 var(--mono);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.reference-location {
+  grid-column: 1 / -1;
 }
 
 .reference-source-tag {

@@ -1,0 +1,189 @@
+{
+  "name": "Combat",
+  "sid": 200,
+  "events": [
+    {
+      "eventType": "block",
+      "sid": 201,
+      "conditions": [
+        {
+          "id": "compare-eventvar",
+          "objectClass": "System",
+          "sid": 203,
+          "parameters": { "variable": "coins", "value": "coins > 0" }
+        }
+      ],
+      "actions": [
+        {
+          "id": "set-eventvar-value",
+          "objectClass": "System",
+          "sid": 202,
+          "parameters": { "variable": "coins", "value": "coins + coins" }
+        }
+      ],
+      "children": [
+        {
+          "eventType": "group",
+          "sid": 210,
+          "children": [
+            {
+              "eventType": "variable",
+              "name": "groupDamage",
+              "type": "number",
+              "initialValue": "0",
+              "isStatic": false,
+              "isConstant": false,
+              "sid": 211
+            },
+            {
+              "eventType": "block",
+              "sid": 212,
+              "conditions": [],
+              "actions": [
+                {
+                  "id": "set-eventvar-value",
+                  "objectClass": "System",
+                  "sid": 213,
+                  "parameters": { "variable": "groupDamage", "value": "groupDamage + coins" }
+                }
+              ],
+              "children": [
+                {
+                  "eventType": "variable",
+                  "name": "nestedDamage",
+                  "type": "number",
+                  "initialValue": "0",
+                  "isStatic": false,
+                  "isConstant": false,
+                  "sid": 214
+                },
+                {
+                  "eventType": "block",
+                  "sid": 215,
+                  "conditions": [],
+                  "actions": [
+                    {
+                      "id": "set-eventvar-value",
+                      "objectClass": "System",
+                      "sid": 216,
+                      "parameters": { "variable": "nestedDamage", "value": "nestedDamage + groupDamage" }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "eventType": "block",
+              "sid": 217,
+              "conditions": [],
+              "actions": [
+                {
+                  "id": "set-value",
+                  "objectClass": "System",
+                  "sid": 218,
+                  "parameters": { "value": "nestedDamage + groupDamage" }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "eventType": "block",
+          "sid": 219,
+          "conditions": [],
+          "actions": [
+            {
+              "id": "set-value",
+              "objectClass": "System",
+              "sid": 220,
+              "parameters": { "value": "groupDamage" }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "eventType": "function-block",
+      "functionName": "AwardCoins",
+      "functionDescription": "Add earned coins",
+      "functionCategory": "Rewards",
+      "functionReturnType": "none",
+      "functionCopyPicked": false,
+      "functionIsAsync": false,
+      "functionParameters": [
+        { "name": "amount", "type": "number", "initialValue": "0", "comment": "Coins earned" }
+      ],
+      "sid": 230,
+      "conditions": [],
+      "actions": [
+        {
+          "id": "add-to-eventvar",
+          "objectClass": "System",
+          "sid": 231,
+          "parameters": { "variable": "coins", "value": "amount" }
+        }
+      ],
+      "children": [
+        {
+          "eventType": "variable",
+          "name": "functionLocal",
+          "type": "number",
+          "initialValue": "0",
+          "isStatic": false,
+          "isConstant": false,
+          "sid": 232
+        },
+        {
+          "eventType": "block",
+          "sid": 233,
+          "conditions": [],
+          "actions": [
+            {
+              "id": "set-eventvar-value",
+              "objectClass": "System",
+              "sid": 234,
+              "parameters": { "variable": "functionLocal", "value": "functionLocal + amount" }
+            }
+          ],
+          "children": [
+            {
+              "eventType": "variable",
+              "name": "nestedFunctionLocal",
+              "type": "number",
+              "initialValue": "0",
+              "isStatic": false,
+              "isConstant": false,
+              "sid": 235
+            },
+            {
+              "eventType": "block",
+              "sid": 236,
+              "conditions": [],
+              "actions": [
+                {
+                  "id": "set-eventvar-value",
+                  "objectClass": "System",
+                  "sid": 237,
+                  "parameters": { "variable": "nestedFunctionLocal", "value": "nestedFunctionLocal + amount" }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "eventType": "block",
+          "sid": 238,
+          "conditions": [],
+          "actions": [
+            {
+              "id": "set-value",
+              "objectClass": "System",
+              "sid": 239,
+              "parameters": { "value": "nestedFunctionLocal + functionLocal + amount" }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

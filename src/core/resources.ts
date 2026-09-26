@@ -47,7 +47,8 @@ async function mapWithConcurrency<T, R>(
 
 function sidOf(record: Record<string, unknown>): string | undefined {
   const value = record.sid;
-  if (typeof value === 'string' || typeof value === 'number') return String(value);
+  if (typeof value === 'number') return String(value);
+  if (typeof value === 'string' && value.trim() !== '') return value;
   return undefined;
 }
 
@@ -67,18 +68,23 @@ function eventSemanticEntities(resource: ParsedResource): ForgeEntity[] {
   const entities: ForgeEntity[] = [];
   const sheetName = resource.entity.name;
 
-  const visit = (node: unknown, depth: number, trail: readonly number[], functionName?: string, functionSid?: string): void => {
-    if (!isRecord(node) || depth > 64) return;
+  interface FunctionScope {
+    readonly entity: ForgeEntity;
+    readonly sid?: string;
+  }
+
+  const visit = (node: unknown, eventPath: readonly number[], functionScope?: FunctionScope): void => {
+    if (!isRecord(node) || eventPath.length > 64) return;
     const eventType = typeof node.eventType === 'string' ? node.eventType : '';
     const sid = sidOf(node);
-    let nestedFunctionName = functionName;
-    let nestedFunctionSid = functionSid;
+    let nestedFunctionScope = functionScope;
 
     if (eventType === 'function-block') {
       const name = stringProperty(node, 'functionName');
       if (name) {
         const metadata: Record<string, JsonValue> = {
           sheetName,
+          ...(sid ? { sid } : {}),
           ...scalarMetadata(node, ['functionDescription', 'functionCategory', 'functionReturnType', 'functionCopyPicked', 'functionIsAsync']),
         };
         const parameters = Array.isArray(node.functionParameters)
@@ -90,25 +96,28 @@ function eventSemanticEntities(resource: ParsedResource): ForgeEntity[] {
             })
           : [];
         if (parameters.length > 0) metadata.parameters = parameters;
-        const functionEntity = createForgeEntity('function', name, resource.entity.sourcePath, metadata, sid ?? trail.join('.'));
+        const functionEntity = createForgeEntity('function', name, resource.entity.sourcePath, metadata, eventPath.join('.'));
         entities.push(functionEntity);
-        nestedFunctionName = name;
-        nestedFunctionSid = sid ?? trail.join('.');
+        nestedFunctionScope = { entity: functionEntity, ...(sid ? { sid } : {}) };
 
         if (Array.isArray(node.functionParameters)) {
           node.functionParameters.forEach((parameter, index) => {
             if (!isRecord(parameter)) return;
             const parameterName = stringProperty(parameter, 'name');
             if (!parameterName) return;
+            const parameterSid = sidOf(parameter);
             const parameterMetadata: Record<string, JsonValue> = {
               sheetName,
               functionName: name,
+              functionId: functionEntity.id,
+              ...(sid ? { functionSid: sid } : {}),
+              ...(parameterSid ? { sid: parameterSid } : {}),
               scope: 'function-parameter',
               ...scalarMetadata(parameter, ['type', 'initialValue', 'comment']),
             };
             entities.push(createForgeEntity(
               'variable', parameterName, resource.entity.sourcePath, parameterMetadata,
-              `${nestedFunctionSid}:parameter:${sidOf(parameter) ?? index}`,
+              `${functionEntity.id}:parameter:${parameterSid ?? index}`,
             ));
           });
         }
@@ -116,24 +125,33 @@ function eventSemanticEntities(resource: ParsedResource): ForgeEntity[] {
     } else if (eventType === 'variable') {
       const name = stringProperty(node, 'name');
       if (name) {
+        const scope = functionScope ? 'function-local' : eventPath.length === 1 ? 'global' : 'local';
         const variableMetadata: Record<string, JsonValue> = {
+          ...(sid ? { sid } : {}),
           sheetName,
-          scope: functionName ? 'function-local' : depth === 0 ? 'global' : 'local',
-          ...(functionName ? { functionName } : {}),
+          scope,
+          ...(scope === 'local' || scope === 'function-local' ? {
+            eventPath: [...eventPath],
+            scopePath: eventPath.slice(0, -1),
+            scopePosition: eventPath.at(-1) ?? 0,
+          } : {}),
+          ...(functionScope ? {
+            functionName: functionScope.entity.name,
+            functionId: functionScope.entity.id,
+            ...(functionScope.sid ? { functionSid: functionScope.sid } : {}),
+          } : {}),
           ...scalarMetadata(node, ['type', 'initialValue', 'isStatic', 'isConstant', 'comment']),
         };
-        entities.push(createForgeEntity('variable', name, resource.entity.sourcePath, variableMetadata, sid ?? trail.join('.')));
+        entities.push(createForgeEntity('variable', name, resource.entity.sourcePath, variableMetadata, eventPath.join('.')));
       }
     }
 
-    for (const key of ['conditions', 'actions', 'children']) {
-      const children = node[key];
-      if (!Array.isArray(children)) continue;
-      children.forEach((child, index) => visit(child, depth + 1, [...trail, index], nestedFunctionName, nestedFunctionSid));
+    if (Array.isArray(node.children)) {
+      node.children.forEach((child, index) => visit(child, [...eventPath, index], nestedFunctionScope));
     }
   };
 
-  events.forEach((event, index) => visit(event, 0, [index]));
+  events.forEach((event, index) => visit(event, [index]));
   return entities;
 }
 
@@ -145,7 +163,9 @@ function objectInstanceVariableEntities(resource: ParsedResource): ForgeEntity[]
     if (!isRecord(variable)) return;
     const name = stringProperty(variable, 'name');
     if (!name) return;
+    const sid = sidOf(variable);
     const metadata: Record<string, JsonValue> = {
+      ...(sid ? { sid } : {}),
       scope: kind === 'family' ? 'family' : 'object',
       ...(kind === 'family' ? { familyName: resource.entity.name } : { objectName: resource.entity.name }),
       ...scalarMetadata(variable, ['type', 'initialValue', 'isStatic', 'isConstant', 'comment']),

@@ -16,8 +16,16 @@ const METADATA_KEYS: Readonly<Record<EntityKind, readonly string[]>> = {
   projectFile: ['constructVersion'],
 };
 
-export function makeStableEntityId(kind: EntityKind, sourcePath: string, name: string, discriminator?: string): string {
-  const parts = [kind, normalizeProjectPath(sourcePath), name, ...(discriminator ? [discriminator] : [])];
+export function makeStableEntityId(
+  kind: EntityKind,
+  sourcePath: string,
+  name: string,
+  discriminator?: string,
+  sid?: string,
+): string {
+  const parts = sid !== undefined && sid !== ''
+    ? [kind, 'sid', sid]
+    : [kind, normalizeProjectPath(sourcePath), name, ...(discriminator ? [discriminator] : [])];
   return parts.map((part) => encodeURIComponent(part)).join(':');
 }
 
@@ -29,8 +37,10 @@ export function createForgeEntity(
   discriminator?: string,
 ): ForgeEntity {
   const normalizedPath = normalizeProjectPath(sourcePath);
+  const sid = metadata.sid;
   return {
-    id: makeStableEntityId(kind, normalizedPath, name, discriminator),
+    id: makeStableEntityId(kind, normalizedPath, name, discriminator,
+      typeof sid === 'string' || typeof sid === 'number' ? String(sid) : undefined),
     kind,
     name,
     sourcePath: normalizedPath,

@@ -1,0 +1,6 @@
+{
+  "name": "Combatants",
+  "sid": 300,
+  "members": ["Player"],
+  "instanceVariables": []
+}

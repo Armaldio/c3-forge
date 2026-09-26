@@ -21,17 +21,17 @@ Choose the folder containing `project.c3proj`, not a `.c3p` archive. Forge reads
 This repository includes a `pnpm-lock.yaml`:
 
 ```sh
-pnpm install
+pnpm install --frozen-lockfile
 pnpm dev
 ```
 
 Then open the local Vite URL in Chromium. The quality commands are:
 
 ```sh
-npm run typecheck
-npm run lint
-npm run test
-npm run build
+pnpm typecheck
+pnpm lint
+pnpm test
+pnpm build
 ```
 
 The tests use checked-in Construct project fixtures and an in-memory filesystem; they do not need access to a real project folder.

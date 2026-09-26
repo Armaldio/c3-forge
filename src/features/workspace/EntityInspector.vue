@@ -36,48 +36,93 @@ interface ReferenceGroup {
   readonly references: readonly ProjectReference[]
 }
 
-const incomingGroups = computed(() => referenceGroups(
-  props.analysis,
-  entity.value,
-  'incoming',
-))
+interface ReferenceSubgroup {
+  readonly confidence: 'known' | 'possible'
+  readonly label: string
+  readonly note?: string
+  readonly groups: readonly ReferenceGroup[]
+}
 
-const outgoingGroups = computed(() => referenceGroups(
-  props.analysis,
-  entity.value,
-  'outgoing',
-))
+interface RelationshipSection {
+  readonly direction: 'incoming' | 'outgoing'
+  readonly label: string
+  readonly emptyText: string
+  readonly count: number
+  readonly subgroups: readonly ReferenceSubgroup[]
+}
+
+const incomingKnownGroups = computed(() => referenceGroups(props.analysis, entity.value, 'incoming', 'known'))
+const incomingPossibleGroups = computed(() => referenceGroups(props.analysis, entity.value, 'incoming', 'possible'))
+const outgoingKnownGroups = computed(() => referenceGroups(props.analysis, entity.value, 'outgoing', 'known'))
+const outgoingPossibleGroups = computed(() => referenceGroups(props.analysis, entity.value, 'outgoing', 'possible'))
+
+const relationshipSections = computed<readonly RelationshipSection[]>(() => [
+  {
+    direction: 'incoming',
+    label: 'Used by',
+    emptyText: 'No incoming references detected.',
+    count: countReferences(incomingKnownGroups.value, incomingPossibleGroups.value),
+    subgroups: [
+      { confidence: 'known', label: 'Known references', groups: incomingKnownGroups.value },
+      {
+        confidence: 'possible',
+        label: 'Possible name matches',
+        note: 'Exact-string matches can be coincidental.',
+        groups: incomingPossibleGroups.value,
+      },
+    ],
+  },
+  {
+    direction: 'outgoing',
+    label: 'References',
+    emptyText: 'No outgoing references detected.',
+    count: countReferences(outgoingKnownGroups.value, outgoingPossibleGroups.value),
+    subgroups: [
+      { confidence: 'known', label: 'Known references', groups: outgoingKnownGroups.value },
+      {
+        confidence: 'possible',
+        label: 'Possible name matches',
+        note: 'Exact-string matches can be coincidental.',
+        groups: outgoingPossibleGroups.value,
+      },
+    ],
+  },
+])
 
 function referenceGroups(
   analysis: ProjectAnalysis,
   selected: ForgeEntity | undefined,
   direction: 'incoming' | 'outgoing',
+  confidence: 'known' | 'possible',
 ): ReferenceGroup[] {
   if (!selected) return []
 
-  const matches = analysis.references.filter((reference) => direction === 'incoming'
-    ? reference.targetEntityId === selected.id
-    : reference.sourceEntityId === selected.id)
+  const indexedReferences = direction === 'incoming'
+    ? analysis.referencesByTarget.get(selected.id) ?? []
+    : analysis.referencesBySource.get(selected.id) ?? []
+  const matches = indexedReferences.filter((reference) => confidence === 'possible'
+    ? reference.source === 'exact-string-fallback'
+    : reference.source !== 'exact-string-fallback')
   const grouped = new Map<string, { label: string; path: string; references: ProjectReference[] }>()
 
   for (const reference of matches) {
-    const relatedId = direction === 'incoming'
-      ? reference.sourceEntityId
-      : reference.targetEntityId
+    const relatedId = direction === 'incoming' ? reference.sourceEntityId : reference.targetEntityId
     const related = relatedId ? analysis.index.byId.get(relatedId) : undefined
     const path = related?.sourcePath ?? reference.sourcePath
     const label = related?.name ?? (direction === 'incoming' ? path : reference.targetName)
     const key = `${path}\u0000${related?.id ?? label}`
     const group = grouped.get(key)
 
-    if (group) {
-      group.references.push(reference)
-    } else {
-      grouped.set(key, { label, path, references: [reference] })
-    }
+    if (group) group.references.push(reference)
+    else grouped.set(key, { label, path, references: [reference] })
   }
 
   return [...grouped].map(([key, group]) => ({ key, ...group }))
+}
+
+function countReferences(...collections: readonly ReferenceGroup[][]): number {
+  return collections.reduce((total, groups) => total
+    + groups.reduce((count, group) => count + group.references.length, 0), 0)
 }
 
 function counterpart(reference: ProjectReference, direction: 'incoming' | 'outgoing') {
@@ -93,6 +138,20 @@ function referenceName(reference: ProjectReference, direction: 'incoming' | 'out
 
 function referencePath(reference: ProjectReference, direction: 'incoming' | 'outgoing'): string {
   return counterpart(reference, direction)?.sourcePath ?? reference.sourcePath
+}
+
+function referenceLocationLabel(reference: ProjectReference): string {
+  const location = reference.sourceLocation
+  if (!location) return reference.sourcePath
+  const details = [
+    location.functionSid ? `function SID ${location.functionSid}` : undefined,
+    location.eventSid ? `event SID ${location.eventSid}` : undefined,
+    location.entryKind && location.entryIndex !== undefined
+      ? `${location.entryKind} ${location.entryIndex + 1}`
+      : undefined,
+    location.jsonPath,
+  ].filter((detail): detail is string => detail !== undefined)
+  return details.join(' · ') || reference.sourcePath
 }
 
 function referenceSourceLabel(reference: ProjectReference): string {
@@ -129,119 +188,78 @@ function navigateToReference(reference: ProjectReference, direction: 'incoming' 
 
       <div class="relationship-grid">
         <section
+          v-for="section in relationshipSections"
+          :key="section.direction"
           class="relationship-section"
-          aria-labelledby="incoming-title"
+          :aria-label="section.label"
         >
           <div class="section-heading-line">
-            <h3 id="incoming-title">
-              Used by
-            </h3>
-            <span class="count-chip">{{ incomingGroups.reduce((total, group) => total + group.references.length, 0) }}</span>
+            <h3>{{ section.label }}</h3>
+            <span class="count-chip">{{ section.count }}</span>
           </div>
           <p
-            v-if="incomingGroups.length === 0"
+            v-if="section.count === 0"
             class="relationship-empty"
           >
-            No incoming references detected.
+            {{ section.emptyText }}
           </p>
-          <ul
+          <div
+            v-for="subgroup in section.subgroups"
             v-else
-            class="reference-groups"
+            :key="subgroup.confidence"
+            class="reference-confidence-section"
+            :data-confidence="subgroup.confidence"
           >
-            <li
-              v-for="group in incomingGroups"
-              :key="group.key"
-              class="reference-group"
-            >
-              <h4>{{ group.label }} <span>{{ group.path }}</span></h4>
-              <ul class="reference-list">
+            <template v-if="subgroup.groups.length">
+              <h4 class="reference-confidence-title">
+                {{ subgroup.label }}
+              </h4>
+              <p
+                v-if="subgroup.note"
+                class="reference-confidence-note"
+              >
+                {{ subgroup.note }}
+              </p>
+              <ul class="reference-groups">
                 <li
-                  v-for="reference in group.references"
-                  :key="reference.id"
-                  class="reference-row"
+                  v-for="group in subgroup.groups"
+                  :key="group.key"
+                  class="reference-group"
                 >
-                  <button
-                    v-if="counterpart(reference, 'incoming')"
-                    class="reference-link"
-                    type="button"
-                    @click="navigateToReference(reference, 'incoming')"
-                  >
-                    {{ referenceName(reference, 'incoming') }}
-                  </button>
-                  <span
-                    v-else
-                    class="reference-name"
-                  >{{ referenceName(reference, 'incoming') }}</span>
-                  <span class="reference-relationship">{{ reference.relationship }}</span>
-                  <span class="reference-path">{{ referencePath(reference, 'incoming') }}</span>
-                  <span
-                    class="reference-source-tag"
-                    :data-source="reference.source"
-                  >
-                    {{ referenceSourceLabel(reference) }} · {{ reference.confidence }}
-                  </span>
+                  <h5>{{ group.label }} <span>{{ group.path }}</span></h5>
+                  <ul class="reference-list">
+                    <li
+                      v-for="reference in group.references"
+                      :key="reference.id"
+                      class="reference-row"
+                    >
+                      <button
+                        v-if="counterpart(reference, section.direction)"
+                        class="reference-link"
+                        type="button"
+                        @click="navigateToReference(reference, section.direction)"
+                      >
+                        {{ referenceName(reference, section.direction) }}
+                      </button>
+                      <span
+                        v-else
+                        class="reference-name"
+                      >{{ referenceName(reference, section.direction) }}</span>
+                      <span class="reference-relationship">{{ reference.relationship }}</span>
+                      <span class="reference-path">{{ referencePath(reference, section.direction) }}</span>
+                      <span class="reference-location">{{ referenceLocationLabel(reference) }}</span>
+                      <span
+                        class="reference-source-tag"
+                        :data-source="reference.source"
+                      >
+                        {{ referenceSourceLabel(reference) }} · {{ reference.confidence }}
+                      </span>
+                    </li>
+                  </ul>
                 </li>
               </ul>
-            </li>
-          </ul>
-        </section>
-
-        <section
-          class="relationship-section"
-          aria-labelledby="outgoing-title"
-        >
-          <div class="section-heading-line">
-            <h3 id="outgoing-title">
-              References
-            </h3>
-            <span class="count-chip">{{ outgoingGroups.reduce((total, group) => total + group.references.length, 0) }}</span>
+            </template>
           </div>
-          <p
-            v-if="outgoingGroups.length === 0"
-            class="relationship-empty"
-          >
-            No outgoing references detected.
-          </p>
-          <ul
-            v-else
-            class="reference-groups"
-          >
-            <li
-              v-for="group in outgoingGroups"
-              :key="group.key"
-              class="reference-group"
-            >
-              <h4>{{ group.label }} <span>{{ group.path }}</span></h4>
-              <ul class="reference-list">
-                <li
-                  v-for="reference in group.references"
-                  :key="reference.id"
-                  class="reference-row"
-                >
-                  <button
-                    v-if="counterpart(reference, 'outgoing')"
-                    class="reference-link"
-                    type="button"
-                    @click="navigateToReference(reference, 'outgoing')"
-                  >
-                    {{ referenceName(reference, 'outgoing') }}
-                  </button>
-                  <span
-                    v-else
-                    class="reference-name"
-                  >{{ referenceName(reference, 'outgoing') }}</span>
-                  <span class="reference-relationship">{{ reference.relationship }}</span>
-                  <span class="reference-path">{{ referencePath(reference, 'outgoing') }}</span>
-                  <span
-                    class="reference-source-tag"
-                    :data-source="reference.source"
-                  >
-                    {{ referenceSourceLabel(reference) }} · {{ reference.confidence }}
-                  </span>
-                </li>
-              </ul>
-            </li>
-          </ul>
         </section>
       </div>
 

@@ -15,6 +15,7 @@ import type { ProjectFileSystem } from '../filesystem';
 const fixtureModules = {
   'sample-project': import.meta.glob<string>('../fixtures/sample-project/**/*', { eager: true, query: '?raw', import: 'default' }),
   'minimal-project': import.meta.glob<string>('../fixtures/minimal-project/**/*', { eager: true, query: '?raw', import: 'default' }),
+  'semantic-project': import.meta.glob<string>('../fixtures/semantic-project/**/*', { eager: true, query: '?raw', import: 'default' }),
 };
 
 class MemoryProjectFileSystem implements ProjectFileSystem {
@@ -159,9 +160,17 @@ describe('Construct project core', () => {
     expect(relationships).toContainEqual(['event-sheet-include', 'Missing Events']);
     expect(relationships).toContainEqual(['function-call', 'Spawn']);
 
-    const issues = analysis.resourceIssues.map((issue) => [issue.code, issue.path]);
-    expect(issues).toContainEqual(['missing-resource', 'objectTypes/Missing.json']);
-    expect(issues).toContainEqual(['invalid-json', 'timelines/Broken.json']);
+    const resourceDiagnostics = analysis.diagnostics.filter((diagnostic) => diagnostic.ruleId.startsWith('resource.'));
+    expect(resourceDiagnostics).toHaveLength(2);
+    expect('resourceIssues' in analysis).toBe(false);
+    expect(resourceDiagnostics).toContainEqual(expect.objectContaining({
+      ruleId: 'resource.missing-resource',
+      sourcePath: 'objectTypes/Missing.json',
+    }));
+    expect(resourceDiagnostics).toContainEqual(expect.objectContaining({
+      ruleId: 'resource.invalid-json',
+      sourcePath: 'timelines/Broken.json',
+    }));
     expect(analysis.diagnostics.some((diagnostic) => diagnostic.ruleId === 'reference.unresolved')).toBe(true);
     expect(analysis.index.byKind.get('asset')?.some((entity) => entity.sourcePath === 'images/player-frame.png')).toBe(true);
     expect(analysis.index.byKind.get('addon')?.some((entity) => entity.name === 'Fixture plugin')).toBe(true);
@@ -177,12 +186,97 @@ describe('Construct project core', () => {
   it('loads a minimal checked-in project and supports structured-ready search parsing', async () => {
     const analysis = await loadProject(fixtureFileSystem('minimal-project'));
     expect(analysis.index.byKind.get('layout')?.map((entity) => entity.name)).toEqual(['Start']);
-    expect(analysis.resourceIssues).toEqual([]);
+    expect(analysis.diagnostics.filter((diagnostic) => diagnostic.ruleId.startsWith('resource.'))).toEqual([]);
     expect(parseEntitySearch('kind:function sheet:"Game Events"')).toEqual({
       terms: [],
       kinds: ['function'],
       sheets: ['game events'],
     });
     expect(searchEntities(analysis.index, 'kind:layout start').map((entity) => entity.name)).toEqual(['Start']);
+  });
+
+  it('resolves Construct globals across sheets and respects nested local and function scopes', async () => {
+    const analysis = await loadProject(fixtureFileSystem('semantic-project'));
+    const byName = (name: string) => analysis.index.byKind.get('variable')?.find((entity) => entity.name === name);
+    const coins = byName('coins');
+    const groupDamage = byName('groupDamage');
+    const nestedDamage = byName('nestedDamage');
+    const amount = byName('amount');
+    const functionLocal = byName('functionLocal');
+    const nestedFunctionLocal = byName('nestedFunctionLocal');
+    const combatSheet = analysis.index.byKind.get('eventSheet')?.find((entity) => entity.name === 'Combat');
+    const combatSourcePath = 'eventSheets/Gameplay/Combat.json';
+
+    expect(coins?.sourcePath).toBe('eventSheets/Globals.json');
+    expect(combatSheet?.sourcePath).toBe(combatSourcePath);
+
+    const combatCoinReferences = analysis.references.filter((reference) =>
+      reference.sourcePath === combatSourcePath && reference.targetEntityId === coins?.id);
+    expect(combatCoinReferences.filter((reference) => reference.relationship === 'event-variable-action')).toHaveLength(2);
+    expect(combatCoinReferences.filter((reference) => reference.relationship === 'event-variable-condition')).toHaveLength(1);
+    expect(combatCoinReferences.filter((reference) => reference.relationship === 'event-variable-expression')).toHaveLength(4);
+    expect(combatCoinReferences.find((reference) => reference.relationship === 'event-variable-condition')?.sourceLocation)
+      .toMatchObject({
+        eventSid: '201',
+        entryKind: 'condition',
+        entryIndex: 0,
+        jsonPath: '$.events[0].conditions[0].parameters.variable',
+      });
+
+    const nestedOccurrences = analysis.references.filter((reference) => reference.targetEntityId === nestedDamage?.id);
+    expect(nestedOccurrences.some((reference) => reference.sourceLocation?.eventSid === '215')).toBe(true);
+    expect(nestedOccurrences.some((reference) => reference.sourceLocation?.eventSid === '217')).toBe(false);
+
+    const outsideGroupUses = analysis.references.filter((reference) =>
+      reference.sourceLocation?.eventSid === '219' && reference.targetName === 'groupDamage');
+    expect(outsideGroupUses.some((reference) => reference.targetEntityId === groupDamage?.id)).toBe(false);
+
+    const award = analysis.index.byKind.get('function')?.find((entity) => entity.name === 'AwardCoins');
+    expect(award?.id).toContain('sid:230');
+    expect(analysis.references.some((reference) =>
+      reference.sourceEntityId === award?.id && reference.targetEntityId === amount?.id)).toBe(true);
+    expect(analysis.references.find((reference) =>
+      reference.sourceEntityId === award?.id && reference.targetEntityId === amount?.id)?.sourceLocation)
+      .toMatchObject({ eventSid: '230', functionSid: '230', eventPath: '$.events[1]' });
+    expect(analysis.references.some((reference) =>
+      reference.sourceLocation?.eventSid === '233' && reference.targetEntityId === functionLocal?.id)).toBe(true);
+    expect(analysis.references.some((reference) =>
+      reference.sourceLocation?.eventSid === '236' && reference.targetEntityId === nestedFunctionLocal?.id)).toBe(true);
+    expect(analysis.references.some((reference) =>
+      reference.sourceLocation?.eventSid === '238' && reference.targetEntityId === nestedFunctionLocal?.id)).toBe(false);
+    expect(analysis.references.some((reference) =>
+      reference.sourceLocation?.eventSid === '238' && reference.targetEntityId === functionLocal?.id)).toBe(true);
+
+    expect(analysis.index.byKind.get('object')?.find((entity) => entity.name === 'Player')?.sourcePath)
+      .toBe('objectTypes/Actors/Player.json');
+    expect(analysis.references.some((reference) =>
+      reference.relationship === 'family-member' && reference.targetName === 'Player')).toBe(true);
+
+    const coinExpressionReferences = combatCoinReferences.filter((reference) => reference.relationship === 'event-variable-expression');
+    expect(coinExpressionReferences).toHaveLength(4);
+    expect(new Set(coinExpressionReferences.map((reference) => reference.id)).size).toBe(4);
+    expect(new Set(coinExpressionReferences.map((reference) => reference.sourceLocation?.jsonPath)).size).toBeGreaterThan(0);
+    expect(coinExpressionReferences.some((reference) => reference.sourceLocation?.eventSid === '201')).toBe(true);
+    expect(coinExpressionReferences.some((reference) => reference.sourceLocation?.eventSid === '212')).toBe(true);
+    expect(coinExpressionReferences.every((reference) => reference.sourceLocation?.entryIndex === 0)).toBe(true);
+    expect(coinExpressionReferences.find((reference) => reference.sourceLocation?.eventSid === '201')?.sourceLocation?.expressionRange)
+      .toEqual({ start: 0, end: 5 });
+    expect(coinExpressionReferences.filter((reference) => reference.sourceLocation?.eventSid === '201'
+      && reference.sourceLocation?.entryKind === 'action')
+      .map((reference) => reference.sourceLocation?.expressionRange?.start)).toEqual([0, 8]);
+
+    const possibleFamilyMatches = analysis.references.filter((reference) =>
+      reference.source === 'exact-string-fallback' && reference.targetName === 'Combatants');
+    expect(possibleFamilyMatches).toHaveLength(1);
+    expect(possibleFamilyMatches[0]?.sourceLocation?.jsonPath).toBe('$.notes');
+
+    expect(analysis.referencesBySource.get(combatSheet?.id ?? '')).toContain(combatCoinReferences[0]);
+    expect(analysis.referencesByTarget.get(coins?.id ?? '')).toEqual(expect.arrayContaining(combatCoinReferences));
+    expect(analysis.dependencies.find((edge) =>
+      edge.sourceEntityId === combatSheet?.id
+      && edge.targetEntityId === coins?.id
+      && edge.relationship === 'event-variable-expression')?.occurrenceIds).toHaveLength(4);
+    expect(new Set(analysis.dependencies.map((edge) => edge.id)).size).toBe(analysis.dependencies.length);
+    expect(analysis.diagnostics.some((diagnostic) => diagnostic.ruleId === 'resource.missing-resource')).toBe(false);
   });
 });

@@ -1,0 +1,15 @@
+{
+  "name": "Globals",
+  "sid": 100,
+  "events": [
+    {
+      "eventType": "variable",
+      "name": "coins",
+      "type": "number",
+      "initialValue": "0",
+      "isStatic": false,
+      "isConstant": false,
+      "sid": 101
+    }
+  ]
+}

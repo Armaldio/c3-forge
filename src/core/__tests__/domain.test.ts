@@ -25,6 +25,16 @@ describe('Construct domain foundations', () => {
     expect(makeStableEntityId('object', player.sourcePath, player.name)).toBe(player.id)
   })
 
+  it('uses Construct SIDs as entity identity across renames and paths', () => {
+    const beforeRename = createForgeEntity('object', 'Player', 'objectTypes/Player.json', { sid: 9001 });
+    const afterRename = createForgeEntity('object', 'Hero', 'objectTypes/Actors/Hero.json', { sid: 9001 });
+    const withoutSid = createForgeEntity('object', 'Player', 'objectTypes/Player.json');
+
+    expect(beforeRename.id).toBe('object:sid:9001');
+    expect(afterRename.id).toBe(beforeRename.id);
+    expect(withoutSid.id).toBe(makeStableEntityId('object', withoutSid.sourcePath, withoutSid.name));
+  });
+
   it('extracts structural references as semantic and exact-string matches only as low-confidence fallback', () => {
     const player = createForgeEntity('object', 'Player', 'objectTypes/Player.json')
     const enemy = createForgeEntity('object', 'Enemy', 'objectTypes/Enemy.json')
@@ -33,13 +43,17 @@ describe('Construct domain foundations', () => {
     const layout = createForgeEntity('layout', 'Main', 'layouts/Main.json')
     const spawn = createForgeEntity('function', 'Spawn', sheet.sourcePath, { sheetName: sheet.name }, 'fn:1')
     const score = createForgeEntity('variable', 'score', sheet.sourcePath, { scope: 'global', sheetName: sheet.name }, 'var:score')
-    const count = createForgeEntity('variable', 'count', sheet.sourcePath, { scope: 'function-parameter', functionName: spawn.name }, 'var:count')
+    const count = createForgeEntity('variable', 'count', sheet.sourcePath, {
+      scope: 'function-parameter', functionName: spawn.name, functionId: spawn.id,
+    }, 'var:count')
     const playerHealth = createForgeEntity('variable', 'health', player.sourcePath, { scope: 'object', objectName: player.name }, 'var:health')
     const enemyHealth = createForgeEntity('variable', 'health', enemy.sourcePath, { scope: 'object', objectName: enemy.name }, 'var:health')
     const team = createForgeEntity('variable', 'team', family.sourcePath, { scope: 'family', familyName: family.name }, 'var:team')
     const ghost = createForgeEntity('variable', 'ghostVariable', sheet.sourcePath, { scope: 'global', sheetName: sheet.name }, 'var:ghost')
     const localOnly = createForgeEntity('variable', 'localOnly', sheet.sourcePath, { scope: 'local', sheetName: sheet.name }, 'var:local-only')
-    const otherSheetScore = createForgeEntity('variable', 'score', 'eventSheets/Other Events.json', { scope: 'global', sheetName: 'Other Events' }, 'var:score')
+    const otherSheetScore = createForgeEntity('variable', 'otherSheetLocal', 'eventSheets/Other Events.json', {
+      scope: 'local', sheetName: 'Other Events', eventPath: [0, 0], scopePath: [0], scopePosition: 0,
+    }, 'var:other-sheet-local')
     const index = createProjectIndex([
       player, enemy, family, sheet, layout, spawn, score, count, playerHealth, enemyHealth, team, ghost, localOnly, otherSheetScore,
     ])

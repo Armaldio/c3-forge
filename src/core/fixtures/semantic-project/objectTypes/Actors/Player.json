@@ -1,0 +1,8 @@
+{
+  "name": "Player",
+  "sid": 400,
+  "plugin-id": "sprite",
+  "instanceVariables": [
+    { "name": "health", "type": "number", "initialValue": 100, "sid": 401 }
+  ]
+}
