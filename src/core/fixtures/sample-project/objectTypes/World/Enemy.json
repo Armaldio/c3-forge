@@ -1,0 +1,6 @@
+{
+  "name": "Enemy",
+  "plugin-id": "sprite",
+  "sid": 200,
+  "instanceVariables": [{ "name": "alert", "type": "boolean", "initialValue": false, "sid": 201 }]
+}

@@ -1,0 +1,13 @@
+{
+  "name": "Main",
+  "eventSheet": "Game Events",
+  "width": 1280,
+  "height": 720,
+  "layers": [
+    {
+      "name": "World",
+      "instances": [{ "type": "Player", "uid": 1 }],
+      "subLayers": [{ "name": "Enemies", "instances": [{ "type": "Enemy", "uid": 2 }] }]
+    }
+  ]
+}

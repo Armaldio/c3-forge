@@ -1,0 +1,6 @@
+{
+  "name": "Actors",
+  "sid": 300,
+  "members": ["Player", "Enemy"],
+  "instanceVariables": [{ "name": "team", "type": "string", "initialValue": "neutral", "sid": 301 }]
+}

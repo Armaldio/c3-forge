@@ -1,0 +1,18 @@
+{
+  "name": "Fixture Forge Project",
+  "savedWithRelease": "Construct 3 r999",
+  "objectTypes": {
+    "items": ["Player", "Missing"],
+    "subfolders": [{ "name": "World", "items": ["Enemy"], "subfolders": [] }]
+  },
+  "families": { "items": ["Actors"], "subfolders": [] },
+  "layouts": { "items": ["Main", "Title Screen"], "subfolders": [] },
+  "eventSheets": { "items": ["Game Events", "Shared Events"], "subfolders": [] },
+  "timelines": { "items": ["Broken"], "subfolders": [] },
+  "flowcharts": { "items": ["Opaque"], "subfolders": [] },
+  "rootFileFolders": {
+    "script": { "items": [{ "name": "main.js", "type": "script" }], "subfolders": [] },
+    "general": { "items": [{ "name": "badge.png", "type": "image" }], "subfolders": [] }
+  },
+  "usedAddons": [{ "type": "plugin", "id": "fixture.plugin", "name": "Fixture plugin", "version": "1.0" }]
+}

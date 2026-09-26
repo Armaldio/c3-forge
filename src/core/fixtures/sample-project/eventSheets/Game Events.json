@@ -1,0 +1,26 @@
+{
+  "name": "Game Events",
+  "events": [
+    { "eventType": "include", "includeSheet": "Shared Events", "sid": 400 },
+    { "eventType": "include", "includeSheet": "Missing Events", "sid": 401 },
+    {
+      "conditions": [{ "objectClass": "Enemy", "id": "OnCreated" }],
+      "actions": [{ "callFunction": "Spawn", "parameters": [] }]
+    },
+    {
+      "eventType": "function-block",
+      "functionName": "Spawn",
+      "functionDescription": "Creates an enemy",
+      "functionReturnType": "none",
+      "functionParameters": [{ "name": "count", "type": "number", "initialValue": "1", "sid": 410 }],
+      "sid": 411,
+      "conditions": [],
+      "actions": []
+    },
+    { "eventType": "variable", "name": "score", "type": "number", "initialValue": "0", "sid": 420 },
+    {
+      "eventType": "group",
+      "children": [{ "eventType": "variable", "name": "localTemp", "type": "number", "initialValue": "0", "sid": 421 }]
+    }
+  ]
+}
