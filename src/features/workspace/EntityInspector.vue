@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import type { ForgeEntity, ProjectAnalysis, ProjectReference } from '../../core/types'
 import { entityKindLabel, formatMetadataValue } from './presentation'
 
@@ -33,6 +33,7 @@ interface ReferenceGroup {
   readonly key: string
   readonly label: string
   readonly path: string
+  readonly entityId?: string
   readonly references: readonly ProjectReference[]
 }
 
@@ -55,6 +56,7 @@ const incomingKnownGroups = computed(() => referenceGroups(props.analysis, entit
 const incomingPossibleGroups = computed(() => referenceGroups(props.analysis, entity.value, 'incoming', 'possible'))
 const outgoingKnownGroups = computed(() => referenceGroups(props.analysis, entity.value, 'outgoing', 'known'))
 const outgoingPossibleGroups = computed(() => referenceGroups(props.analysis, entity.value, 'outgoing', 'possible'))
+const activeDirection = ref<'incoming' | 'outgoing'>('incoming')
 
 const relationshipSections = computed<readonly RelationshipSection[]>(() => [
   {
@@ -89,6 +91,8 @@ const relationshipSections = computed<readonly RelationshipSection[]>(() => [
   },
 ])
 
+const activeSection = computed(() => relationshipSections.value.find((section) => section.direction === activeDirection.value))
+
 function referenceGroups(
   analysis: ProjectAnalysis,
   selected: ForgeEntity | undefined,
@@ -114,7 +118,7 @@ function referenceGroups(
     const group = grouped.get(key)
 
     if (group) group.references.push(reference)
-    else grouped.set(key, { label, path, references: [reference] })
+    else grouped.set(key, { label, path, ...(related ? { entityId: related.id } : {}), references: [reference] })
   }
 
   return [...grouped].map(([key, group]) => ({ key, ...group }))
@@ -123,21 +127,6 @@ function referenceGroups(
 function countReferences(...collections: readonly ReferenceGroup[][]): number {
   return collections.reduce((total, groups) => total
     + groups.reduce((count, group) => count + group.references.length, 0), 0)
-}
-
-function counterpart(reference: ProjectReference, direction: 'incoming' | 'outgoing') {
-  const id = direction === 'incoming' ? reference.sourceEntityId : reference.targetEntityId
-  return id ? props.analysis.index.byId.get(id) : undefined
-}
-
-function referenceName(reference: ProjectReference, direction: 'incoming' | 'outgoing'): string {
-  const related = counterpart(reference, direction)
-  if (related) return related.name
-  return direction === 'incoming' ? reference.sourcePath : reference.targetName
-}
-
-function referencePath(reference: ProjectReference, direction: 'incoming' | 'outgoing'): string {
-  return counterpart(reference, direction)?.sourcePath ?? reference.sourcePath
 }
 
 function referenceLocationLabel(reference: ProjectReference): string {
@@ -155,14 +144,38 @@ function referenceLocationLabel(reference: ProjectReference): string {
 }
 
 function referenceSourceLabel(reference: ProjectReference): string {
-  if (reference.source === 'construct-expression') return 'expression'
-  return reference.source === 'semantic' ? 'semantic' : 'name match'
+  if (reference.source === 'construct-expression') return 'Expression'
+  return reference.source === 'semantic' ? 'Semantic' : 'Possible'
 }
 
-function navigateToReference(reference: ProjectReference, direction: 'incoming' | 'outgoing'): void {
-  const related = counterpart(reference, direction)
-  if (related) emit('select', related.id)
+function relationshipLabel(relationship: string): string {
+  const labels: Readonly<Record<string, string>> = {
+    'event-object-reference': 'Object reference',
+    'event-variable-action': 'Variable action',
+    'event-variable-condition': 'Variable condition',
+    'event-variable-expression': 'Variable expression',
+    'event-sheet-include': 'Included event sheet',
+    'family-member': 'Family member',
+    'function-call': 'Function call',
+    'function-call-expression': 'Function call in expression',
+    'layout-event-sheet': 'Layout event sheet',
+    'layout-instance': 'Layout instance',
+    'exact-string-match': 'Exact string match',
+  }
+  return labels[relationship] ?? relationship.replaceAll('-', ' ')
 }
+
+function handleTabKeydown(event: KeyboardEvent): void {
+  let direction: 'incoming' | 'outgoing' | undefined
+  if (event.key === 'ArrowLeft' || event.key === 'Home') direction = 'incoming'
+  else if (event.key === 'ArrowRight' || event.key === 'End') direction = 'outgoing'
+  if (!direction) return
+
+  event.preventDefault()
+  activeDirection.value = direction
+  void nextTick(() => document.getElementById(`reference-tab-${direction}`)?.focus())
+}
+
 </script>
 
 <template>
@@ -186,26 +199,45 @@ function navigateToReference(reference: ProjectReference, direction: 'incoming' 
         </div>
       </div>
 
-      <div class="relationship-grid">
-        <section
+      <div
+        class="reference-tabs"
+        role="tablist"
+        aria-label="Entity references"
+        @keydown="handleTabKeydown"
+      >
+        <button
           v-for="section in relationshipSections"
+          :id="`reference-tab-${section.direction}`"
           :key="section.direction"
-          class="relationship-section"
-          :aria-label="section.label"
+          class="reference-tab"
+          type="button"
+          role="tab"
+          :aria-selected="activeDirection === section.direction"
+          :aria-controls="`reference-panel-${section.direction}`"
+          :tabindex="activeDirection === section.direction ? 0 : -1"
+          @click="activeDirection = section.direction"
         >
-          <div class="section-heading-line">
-            <h3>{{ section.label }}</h3>
-            <span class="count-chip">{{ section.count }}</span>
-          </div>
+          {{ section.label }} <span>{{ section.count }}</span>
+        </button>
+      </div>
+
+      <section
+        v-if="activeSection"
+        :id="`reference-panel-${activeSection.direction}`"
+        class="relationship-section"
+        role="tabpanel"
+        :aria-labelledby="`reference-tab-${activeSection.direction}`"
+      >
+        <template v-if="activeSection.count === 0">
           <p
-            v-if="section.count === 0"
             class="relationship-empty"
           >
-            {{ section.emptyText }}
+            {{ activeSection.emptyText }}
           </p>
+        </template>
+        <template v-else>
           <div
-            v-for="subgroup in section.subgroups"
-            v-else
+            v-for="subgroup in activeSection.subgroups"
             :key="subgroup.confidence"
             class="reference-confidence-section"
             :data-confidence="subgroup.confidence"
@@ -226,51 +258,77 @@ function navigateToReference(reference: ProjectReference, direction: 'incoming' 
                   :key="group.key"
                   class="reference-group"
                 >
-                  <h5>{{ group.label }} <span>{{ group.path }}</span></h5>
+                  <h4
+                    class="reference-group-title"
+                    :title="group.path"
+                  >
+                    <button
+                      v-if="group.entityId"
+                      type="button"
+                      class="reference-group-link"
+                      @click="emit('select', group.entityId)"
+                    >
+                      {{ group.label }}
+                    </button>
+                    <span v-else>{{ group.label }}</span>
+                    <span class="reference-group-count">{{ group.references.length }}</span>
+                  </h4>
                   <ul class="reference-list">
                     <li
                       v-for="reference in group.references"
                       :key="reference.id"
                       class="reference-row"
                     >
-                      <button
-                        v-if="counterpart(reference, section.direction)"
-                        class="reference-link"
-                        type="button"
-                        @click="navigateToReference(reference, section.direction)"
-                      >
-                        {{ referenceName(reference, section.direction) }}
-                      </button>
-                      <span
-                        v-else
-                        class="reference-name"
-                      >{{ referenceName(reference, section.direction) }}</span>
-                      <span class="reference-relationship">{{ reference.relationship }}</span>
-                      <span class="reference-path">{{ referencePath(reference, section.direction) }}</span>
-                      <span class="reference-location">{{ referenceLocationLabel(reference) }}</span>
-                      <span
-                        class="reference-source-tag"
-                        :data-source="reference.source"
-                      >
-                        {{ referenceSourceLabel(reference) }} · {{ reference.confidence }}
-                      </span>
+                      <div class="reference-row-main">
+                        <span
+                          v-if="activeSection.direction === 'outgoing'"
+                          class="reference-target-name"
+                        >{{ reference.targetName }}</span>
+                        <span class="reference-relationship">{{ relationshipLabel(reference.relationship) }}</span>
+                        <span
+                          class="reference-source-tag"
+                          :data-source="reference.source"
+                        >{{ referenceSourceLabel(reference) }}</span>
+                      </div>
+                      <details class="reference-details">
+                        <summary :aria-label="`Details for ${reference.targetName}`">
+                          Details
+                        </summary>
+                        <dl class="reference-detail-list">
+                          <div>
+                            <dt>Source file</dt>
+                            <dd><code>{{ reference.sourcePath }}</code></dd>
+                          </div>
+                          <div>
+                            <dt>Location</dt>
+                            <dd><code>{{ referenceLocationLabel(reference) }}</code></dd>
+                          </div>
+                          <div>
+                            <dt>Target</dt>
+                            <dd>{{ reference.targetName }}</dd>
+                          </div>
+                          <div>
+                            <dt>Confidence</dt>
+                            <dd>{{ reference.confidence }}</dd>
+                          </div>
+                        </dl>
+                      </details>
                     </li>
                   </ul>
                 </li>
               </ul>
             </template>
           </div>
-        </section>
-      </div>
+        </template>
+      </section>
 
-      <section
+      <details
         v-if="metadataRows.length"
         class="metadata-section"
-        aria-labelledby="metadata-title"
       >
-        <h3 id="metadata-title">
+        <summary id="metadata-title">
           Indexed metadata
-        </h3>
+        </summary>
         <dl class="metadata-list">
           <div
             v-for="row in metadataRows"
@@ -281,7 +339,7 @@ function navigateToReference(reference: ProjectReference, direction: 'incoming' 
             <dd><code>{{ row.value }}</code></dd>
           </div>
         </dl>
-      </section>
+      </details>
     </template>
 
     <div

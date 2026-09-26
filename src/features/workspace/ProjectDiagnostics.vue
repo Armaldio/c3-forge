@@ -6,6 +6,10 @@ const props = defineProps<{
   analysis: ProjectAnalysis
 }>()
 
+const emit = defineEmits<{
+  close: []
+}>()
+
 const severityOrder: readonly DiagnosticSeverity[] = ['error', 'warning', 'info']
 const summary = computed(() => severityOrder.map((severity) => ({
   severity,
@@ -24,13 +28,21 @@ const hasFindings = computed(() => findingCount.value > 0)
     <div class="pane-heading">
       <div>
         <p class="eyebrow">
-          Project health
+          Project report
         </p>
         <h2 id="diagnostics-title">
           Diagnostics
         </h2>
       </div>
       <span class="count-chip">{{ findingCount }}</span>
+      <button
+        class="diagnostics-close"
+        type="button"
+        aria-label="Close diagnostics"
+        @click="emit('close')"
+      >
+        ×
+      </button>
     </div>
 
     <ul

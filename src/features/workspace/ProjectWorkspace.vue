@@ -27,11 +27,33 @@ const emit = defineEmits<{
   'clear-project': []
 }>()
 
-const projectActionLabel = computed(() => props.analysis ? 'Open another folder' : 'Open project folder')
 const loadingLabel = computed(() => props.loadingStage ? loadStageLabel[props.loadingStage] : 'Preparing project')
 const archiveInput = ref<HTMLInputElement | null>(null)
+const projectMenu = ref<HTMLDetailsElement | null>(null)
+const diagnosticsOpen = ref(false)
+const diagnosticCount = computed(() => props.analysis?.diagnostics.length ?? 0)
+const diagnosticHealth = computed(() => {
+  const counts = props.analysis?.stats.diagnosticsBySeverity
+  if (!counts || diagnosticCount.value === 0) return 'Project healthy'
+  const parts = [
+    counts.error ? `${counts.error} ${counts.error === 1 ? 'error' : 'errors'}` : '',
+    counts.warning ? `${counts.warning} ${counts.warning === 1 ? 'warning' : 'warnings'}` : '',
+    counts.info ? `${counts.info} ${counts.info === 1 ? 'note' : 'notes'}` : '',
+  ].filter(Boolean)
+  return parts.join(' · ')
+})
+
+function closeProjectMenu(): void {
+  if (projectMenu.value) projectMenu.value.open = false
+}
+
+function chooseFolder(): void {
+  closeProjectMenu()
+  emit('open-project')
+}
 
 function chooseArchive(): void {
+  closeProjectMenu()
   archiveInput.value?.click()
 }
 
@@ -114,26 +136,30 @@ function handleArchiveSelection(event: Event): void {
           @update:query="emit('update:searchQuery', $event)"
           @select="emit('select-entity', $event)"
         />
-        <div class="project-open-actions">
-          <button
-            class="open-project-button"
-            type="button"
-            :aria-label="projectActionLabel"
-            :disabled="loading || !browserSupported"
-            @click="emit('open-project')"
-          >
-            <span aria-hidden="true">+</span>{{ projectActionLabel }}
-          </button>
-          <button
-            class="open-project-button archive-open-button"
-            type="button"
-            aria-label="Open .c3p archive"
-            :disabled="loading"
-            @click="chooseArchive"
-          >
-            <span aria-hidden="true">▣</span>Open .c3p
-          </button>
-        </div>
+        <details
+          ref="projectMenu"
+          class="project-open-menu"
+        >
+          <summary class="open-project-button open-menu-trigger">
+            Open <span aria-hidden="true">▾</span>
+          </summary>
+          <div class="project-open-menu-list">
+            <button
+              type="button"
+              :disabled="loading || !browserSupported"
+              @click="chooseFolder"
+            >
+              Open folder project
+            </button>
+            <button
+              type="button"
+              :disabled="loading"
+              @click="chooseArchive"
+            >
+              Open .c3p archive
+            </button>
+          </div>
+        </details>
       </div>
 
       <div
@@ -162,7 +188,7 @@ function handleArchiveSelection(event: Event): void {
           class="text-button"
           type="button"
           :disabled="loading || !browserSupported"
-          @click="emit('open-project')"
+          @click="chooseFolder"
         >
           Try another folder
         </button>
@@ -176,29 +202,59 @@ function handleArchiveSelection(event: Event): void {
         </button>
       </div>
 
-      <section
-        v-if="analysis"
-        class="workspace-layout"
-        aria-label="Project workspace"
-      >
-        <EntityExplorer
-          :analysis="analysis"
-          :selected-entity-id="selectedEntityId"
-          @select="emit('select-entity', $event)"
-        />
-        <div class="main-column">
-          <ProjectOverview :analysis="analysis" />
-          <EntityInspector
+      <template v-if="analysis">
+        <section
+          class="workspace-layout"
+          aria-label="Project workspace"
+        >
+          <EntityExplorer
             :analysis="analysis"
             :selected-entity-id="selectedEntityId"
             @select="emit('select-entity', $event)"
           />
+          <div class="main-column">
+            <ProjectOverview :analysis="analysis" />
+            <EntityInspector
+              :analysis="analysis"
+              :selected-entity-id="selectedEntityId"
+              @select="emit('select-entity', $event)"
+            />
+          </div>
+        </section>
+
+        <div class="workspace-statusbar">
+          <p
+            class="project-health"
+            :data-health="diagnosticCount ? 'issues' : 'healthy'"
+          >
+            <span aria-hidden="true">{{ diagnosticCount ? '!' : '✓' }}</span>
+            {{ diagnosticHealth }}
+          </p>
+          <button
+            class="diagnostics-toggle"
+            type="button"
+            aria-controls="diagnostics-drawer"
+            :aria-expanded="diagnosticsOpen"
+            @click="diagnosticsOpen = !diagnosticsOpen"
+          >
+            Diagnostics <span>{{ diagnosticCount }}</span>
+          </button>
         </div>
-        <ProjectDiagnostics :analysis="analysis" />
-      </section>
+
+        <div
+          v-show="diagnosticsOpen"
+          id="diagnostics-drawer"
+          class="diagnostics-drawer"
+        >
+          <ProjectDiagnostics
+            :analysis="analysis"
+            @close="diagnosticsOpen = false"
+          />
+        </div>
+      </template>
 
       <section
-        v-else-if="loading && !analysis"
+        v-else-if="loading"
         class="welcome-state"
         aria-labelledby="welcome-title"
         aria-live="polite"
@@ -299,7 +355,7 @@ function handleArchiveSelection(event: Event): void {
               class="open-project-button state-action"
               type="button"
               :disabled="loading"
-              @click="emit('open-project')"
+              @click="chooseFolder"
             >
               <span aria-hidden="true">+</span>Open project folder
             </button>
