@@ -38,6 +38,10 @@ The tests use checked-in Construct project fixtures and an in-memory filesystem;
 
 The real-project parser validation corpus and provenance notes are recorded in [docs/real-construct-validation.md](docs/real-construct-validation.md).
 
+## Cloudflare Pages deployment
+
+When enabled, GitHub Actions deploys `dist/` to the Cloudflare Pages project `c3-forge` after all quality checks pass on pushes to `main`. Pull requests never deploy. To enable deployment, create the Pages project if needed, add the `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` Actions secrets, and set the `CLOUDFLARE_PAGES_AUTO_DEPLOY` Actions variable to `true`.
+
 ## Architecture
 
 The dependency direction is UI → application → Construct core → `ProjectFileSystem`. The browser implementation lives under `src/infrastructure/browser` and is the only layer that uses browser file handles. The filesystem contract exposes reads, existence checks, direct directory listings, and path resolution; it has no write methods.
