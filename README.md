@@ -36,6 +36,8 @@ pnpm build
 
 The tests use checked-in Construct project fixtures and an in-memory filesystem; they do not need access to a real project folder.
 
+The real-project parser validation corpus and provenance notes are recorded in [docs/real-construct-validation.md](docs/real-construct-validation.md).
+
 ## Architecture
 
 The dependency direction is UI → application → Construct core → `ProjectFileSystem`. The browser implementation lives under `src/infrastructure/browser` and is the only layer that uses browser file handles. The filesystem contract exposes reads, existence checks, direct directory listings, and path resolution; it has no write methods.
