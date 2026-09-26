@@ -29,8 +29,9 @@ The production build was opened in headless Chromium 153 from Vite's static prev
 - PlatformerTemplate loaded 214 entities and 629 occurrences. `isPaused` showed 4 incoming rows across two sheet paths, `layerName` showed 6 function-parameter occurrences, `C_HexDigits` showed 6 known references and 1 separate possible match, and family `fPlayer` showed 17 outgoing rows.
 - FirstPersonShooter2 loaded 180 entities and 462 occurrences. `GravityZ` showed 2 incoming rows, local `ANIM_Animation1` showed 1, and function parameter `oldValue` showed 2.
 - Both runs had no console errors/warnings or failed requests. SHA-256 manifests of both project folders were identical before and after.
+- Five Chromium runs measured from clicking **Open project folder** until the project overview rendered. Command & Construct (236 files, 2.76 MB, 177 references) had a 226 ms median; PlatformerTemplate (67 files, 0.45 MB, 629 references) had a 471 ms median. App navigation to network idle was 0.68–0.97 seconds across those runs.
 
-These browser checks were against the local static preview. A separate check against the Cloudflare deployment remains necessary after the deployment credentials are available.
+These timings are from the local static preview in headless Chromium and use the in-memory read-only folder picker harness; they exclude opening the browser and OS-level folder selection/read latency. A separate check against the Cloudflare deployment remains necessary after the deployment credentials are available.
 
 ## Local-only safety
 
