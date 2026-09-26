@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import type { ForgeEntity, ProjectAnalysis, ProjectLoadStage } from '../../core/types'
 import EntityExplorer from './EntityExplorer.vue'
 import EntityInspector from './EntityInspector.vue'
@@ -21,6 +21,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'open-project': []
+  'open-archive': [file: File]
   'update:searchQuery': [value: string]
   'select-entity': [id: string]
   'clear-project': []
@@ -28,10 +29,31 @@ const emit = defineEmits<{
 
 const projectActionLabel = computed(() => props.analysis ? 'Open another folder' : 'Open project folder')
 const loadingLabel = computed(() => props.loadingStage ? loadStageLabel[props.loadingStage] : 'Preparing project')
+const archiveInput = ref<HTMLInputElement | null>(null)
+
+function chooseArchive(): void {
+  archiveInput.value?.click()
+}
+
+function handleArchiveSelection(event: Event): void {
+  const input = event.currentTarget
+  if (!(input instanceof HTMLInputElement)) return
+  const file = input.files?.[0]
+  input.value = ''
+  if (file) emit('open-archive', file)
+}
 </script>
 
 <template>
   <div class="forge-shell">
+    <input
+      ref="archiveInput"
+      class="archive-input"
+      type="file"
+      accept=".c3p"
+      aria-label="Choose a Construct 3 project archive"
+      @change="handleArchiveSelection"
+    >
     <a
       class="skip-link"
       href="#main-content"
@@ -92,15 +114,26 @@ const loadingLabel = computed(() => props.loadingStage ? loadStageLabel[props.lo
           @update:query="emit('update:searchQuery', $event)"
           @select="emit('select-entity', $event)"
         />
-        <button
-          class="open-project-button"
-          type="button"
-          :aria-label="projectActionLabel"
-          :disabled="loading"
-          @click="emit('open-project')"
-        >
-          <span aria-hidden="true">+</span>{{ projectActionLabel }}
-        </button>
+        <div class="project-open-actions">
+          <button
+            class="open-project-button"
+            type="button"
+            :aria-label="projectActionLabel"
+            :disabled="loading || !browserSupported"
+            @click="emit('open-project')"
+          >
+            <span aria-hidden="true">+</span>{{ projectActionLabel }}
+          </button>
+          <button
+            class="open-project-button archive-open-button"
+            type="button"
+            aria-label="Open .c3p archive"
+            :disabled="loading"
+            @click="chooseArchive"
+          >
+            <span aria-hidden="true">▣</span>Open .c3p
+          </button>
+        </div>
       </div>
 
       <div
@@ -133,6 +166,14 @@ const loadingLabel = computed(() => props.loadingStage ? loadStageLabel[props.lo
         >
           Try another folder
         </button>
+        <button
+          class="text-button"
+          type="button"
+          :disabled="loading"
+          @click="chooseArchive"
+        >
+          Open .c3p archive
+        </button>
       </div>
 
       <section
@@ -157,7 +198,7 @@ const loadingLabel = computed(() => props.loadingStage ? loadStageLabel[props.lo
       </section>
 
       <section
-        v-else-if="browserSupported && loading"
+        v-else-if="loading && !analysis"
         class="welcome-state"
         aria-labelledby="welcome-title"
         aria-live="polite"
@@ -172,7 +213,7 @@ const loadingLabel = computed(() => props.loadingStage ? loadStageLabel[props.lo
           <span /><span /><span />
         </div>
         <p class="eyebrow">
-          Reading a project folder
+          Reading project files
         </p>
         <h1 id="welcome-title">
           {{ loadingLabel }}
@@ -214,18 +255,28 @@ const loadingLabel = computed(() => props.loadingStage ? loadStageLabel[props.lo
             Browser requirement
           </p>
           <h1 id="welcome-title">
-            Folder access needs Chromium.
+            Open a folder or archive.
           </h1>
           <p class="state-description">
-            C3 Forge reads Construct projects through the browser’s local folder picker. Open this app in Chromium over HTTPS or localhost to continue.
+            Folder selection needs Chromium over HTTPS or localhost. You can open a <code>.c3p</code> archive directly in this browser.
           </p>
-          <button
-            class="open-project-button state-action"
-            type="button"
-            disabled
-          >
-            Open project folder
-          </button>
+          <div class="project-open-actions state-actions">
+            <button
+              class="open-project-button state-action"
+              type="button"
+              disabled
+            >
+              Open project folder
+            </button>
+            <button
+              class="open-project-button archive-open-button state-action"
+              type="button"
+              :disabled="loading"
+              @click="chooseArchive"
+            >
+              <span aria-hidden="true">▣</span>Open .c3p archive
+            </button>
+          </div>
         </template>
         <template v-else>
           <div
@@ -241,16 +292,26 @@ const loadingLabel = computed(() => props.loadingStage ? loadStageLabel[props.lo
             See how your project fits together.
           </h1>
           <p class="state-description">
-            Choose a Construct 3 folder project to index its entities, follow references, and review resource issues. Forge never writes to project files.
+            Choose a Construct 3 folder project or a <code>.c3p</code> archive to index entities, follow references, and review resource issues. Forge never writes to project files.
           </p>
-          <button
-            class="open-project-button state-action"
-            type="button"
-            :disabled="loading"
-            @click="emit('open-project')"
-          >
-            <span aria-hidden="true">+</span>Open project folder
-          </button>
+          <div class="project-open-actions state-actions">
+            <button
+              class="open-project-button state-action"
+              type="button"
+              :disabled="loading"
+              @click="emit('open-project')"
+            >
+              <span aria-hidden="true">+</span>Open project folder
+            </button>
+            <button
+              class="open-project-button archive-open-button state-action"
+              type="button"
+              :disabled="loading"
+              @click="chooseArchive"
+            >
+              <span aria-hidden="true">▣</span>Open .c3p archive
+            </button>
+          </div>
           <p class="state-footnote">
             Select a folder containing <code>project.c3proj</code>
           </p>

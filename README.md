@@ -1,6 +1,6 @@
 # C3 Forge
 
-C3 Forge is a local-first, read-only analyzer for Construct 3 folder projects. It reads a project in Chromium, builds a semantic index of the resources it understands, and shows entity relationships and conservative diagnostics. Project files stay on the selected device and Forge has no write operations.
+C3 Forge is a local-first, read-only analyzer for Construct 3 projects. It reads folder projects or `.c3p` archives in the browser, builds a semantic index of the resources it understands, and shows entity relationships and conservative diagnostics. Project files stay on the selected device and Forge has no write operations.
 
 ## V0 scope
 
@@ -12,9 +12,9 @@ V0 intentionally does not write to projects or implement refactoring, rollback, 
 
 ## Browser support
 
-Opening a folder uses Chromium's File System Access API. Use a current Chromium-based browser and serve Forge from HTTPS or `localhost` (the browser requires a secure context). Browser support for `showDirectoryPicker()` is limited; Forge detects whether the API is available and displays a requirement message when it is not.
+Opening a folder uses Chromium's File System Access API. Use a current Chromium-based browser and serve Forge from HTTPS or `localhost` (the browser requires a secure context). Browser support for `showDirectoryPicker()` is limited; Forge detects whether the API is available and displays a requirement message when it is not. `.c3p` archives use the browser's regular file picker and do not need an environment variable or server-side processing.
 
-Choose the folder containing `project.c3proj`, not a `.c3p` archive. Forge reads the selected directory only. The browser may ask for read access when a folder is selected.
+Choose a folder containing `project.c3proj` or select a `.c3p` archive. Archives are inspected in memory and never extracted to disk or uploaded. The browser may ask for read access when a folder is selected.
 
 ## Run and verify
 
@@ -34,7 +34,7 @@ pnpm test
 pnpm build
 ```
 
-The tests use checked-in Construct project fixtures and an in-memory filesystem; they do not need access to a real project folder.
+The tests use checked-in Construct project fixtures, generated ZIP archives, and an in-memory filesystem; they do not need access to a real project folder.
 
 The real-project parser validation corpus and provenance notes are recorded in [docs/real-construct-validation.md](docs/real-construct-validation.md).
 
@@ -48,4 +48,4 @@ The dependency direction is UI → application → Construct core → `ProjectFi
 
 `src/core` is independent of Vue and browser APIs. It parses JSON as `unknown`, converts supported resources into normalized manifest and entity types, builds stable entity IDs and lookup maps, extracts references, and runs diagnostics. Raw resource objects stay inside the core extractors and are not returned to the UI. The core can therefore be exercised with an in-memory filesystem.
 
-The application layer coordinates folder selection, loading progress, and search. Vue components under `src/features/workspace` only render the analysis and emit user actions. Workspace state lives in `src/App.vue`; V0 does not need a router or a global store.
+The application layer coordinates folder and archive selection, loading progress, and search. Vue components under `src/features/workspace` only render the analysis and emit user actions. Workspace state lives in `src/App.vue`; V0 does not need a router or a global store.

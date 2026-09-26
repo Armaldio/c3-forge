@@ -2,7 +2,7 @@
 import { computed, ref, shallowRef } from 'vue'
 import type { ProjectAnalysis, ProjectLoadStage } from './core/types'
 import ProjectWorkspace from './features/workspace/ProjectWorkspace.vue'
-import { canOpenProjectFolder, openProjectFolder, searchProjectEntities } from './application/workspace'
+import { canOpenProjectFolder, openProjectArchive, openProjectFolder, searchProjectEntities } from './application/workspace'
 
 const analysis = shallowRef<ProjectAnalysis | null>(null)
 const selectedEntityId = ref<string | null>(null)
@@ -40,6 +40,28 @@ async function handleOpenProject(): Promise<void> {
   }
 }
 
+async function handleOpenProjectArchive(file: File): Promise<void> {
+  if (loading.value) return
+
+  loading.value = true
+  loadingStage.value = null
+  error.value = null
+
+  try {
+    const nextAnalysis = await openProjectArchive(file, (stage) => {
+      loadingStage.value = stage
+    })
+    analysis.value = nextAnalysis
+    selectedEntityId.value = null
+    searchQuery.value = ''
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : 'An unexpected error prevented the project from loading.'
+  } finally {
+    loading.value = false
+    loadingStage.value = null
+  }
+}
+
 function handleSelectEntity(entityId: string): void {
   if (analysis.value?.index.byId.has(entityId)) selectedEntityId.value = entityId
 }
@@ -64,6 +86,7 @@ function handleClearProject(): void {
     :error="error"
     :browser-supported="browserSupported"
     @open-project="handleOpenProject"
+    @open-archive="handleOpenProjectArchive"
     @update:search-query="searchQuery = $event"
     @select-entity="handleSelectEntity"
     @clear-project="handleClearProject"

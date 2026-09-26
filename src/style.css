@@ -240,6 +240,17 @@ code {
   background: #111a23;
 }
 
+.project-open-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 7px;
+}
+
+.archive-input {
+  display: none;
+}
+
 .global-search {
   position: relative;
   width: min(560px, 100%);
@@ -389,6 +400,17 @@ code {
 
 .open-project-button:hover:not(:disabled) {
   background: #d8f69c;
+}
+
+.archive-open-button {
+  border-color: #52634f;
+  background: #17231f;
+  color: #d3dfc4;
+}
+
+.archive-open-button:hover:not(:disabled) {
+  border-color: #98b46b;
+  background: #25362a;
 }
 
 .open-project-button:disabled {
@@ -1202,6 +1224,15 @@ code {
   padding-inline: 14px;
 }
 
+.state-actions {
+  margin-top: 23px;
+  flex-wrap: wrap;
+}
+
+.state-actions .state-action {
+  margin-top: 0;
+}
+
 .state-footnote {
   margin: 12px 0 0;
   color: var(--text-dim);
@@ -1328,7 +1359,7 @@ code {
     padding: 9px 10px;
   }
 
-  .workspace-toolbar > .open-project-button {
+  .workspace-toolbar .project-open-actions > .open-project-button {
     width: 35px;
     min-width: 35px;
     overflow: hidden;
@@ -1336,7 +1367,7 @@ code {
     font-size: 0;
   }
 
-  .workspace-toolbar > .open-project-button > span {
+  .workspace-toolbar .project-open-actions > .open-project-button > span {
     font-size: 18px;
   }
 
