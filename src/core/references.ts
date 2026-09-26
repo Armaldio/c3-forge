@@ -13,7 +13,7 @@ import type {
 
 const EVENT_REFERENCE_KINDS: readonly EntityKind[] = ['object', 'family'];
 const FALLBACK_KINDS: readonly EntityKind[] = ['object', 'family', 'layout', 'eventSheet', 'function', 'variable'];
-const NON_OBJECT_CLASSES = new Set(['system', 'function']);
+const NON_OBJECT_CLASSES = new Set(['system', 'function', 'functions']);
 const EVENT_VARIABLE_PARAMETER_ACTIONS = new Set(['set-eventvar-value', 'add-to-eventvar']);
 const EVENT_VARIABLE_PARAMETER_CONDITIONS = new Set(['compare-eventvar']);
 const EXPRESSION_PARAMETER_NAMES = new Set(['count', 'expression', 'first-value', 'second-value', 'text', 'value']);
@@ -36,6 +36,7 @@ interface EventScope {
   readonly eventJsonPath: string;
   readonly eventSid?: string;
   readonly functionEntity?: ForgeEntity;
+  readonly functionId?: string;
   readonly functionSid?: string;
 }
 
@@ -108,15 +109,14 @@ function numberPath(metadata: Readonly<Record<string, unknown>>, key: string): r
   return numbers;
 }
 
+/** Construct scopes locals by indentation: same-level siblings and their descendants can use the local. */
 function isWithinDeclaredScope(entity: ForgeEntity, eventPath: readonly number[]): boolean {
   const scopePath = numberPath(entity.metadata, 'scopePath');
-  const position = entity.metadata.scopePosition;
-  if (!scopePath || typeof position !== 'number' || eventPath.length <= scopePath.length) return false;
+  if (!scopePath || eventPath.length <= scopePath.length) return false;
   for (let index = 0; index < scopePath.length; index += 1) {
     if (scopePath[index] !== eventPath[index]) return false;
   }
-  const referencePosition = eventPath[scopePath.length];
-  return referencePosition !== undefined && referencePosition >= position;
+  return true;
 }
 
 function variableEntity(
@@ -124,15 +124,17 @@ function variableEntity(
   name: string,
   sourcePath: string,
   eventPath: readonly number[],
-  functionEntity?: ForgeEntity,
+  functionId?: string,
 ): ForgeEntity | undefined {
   const candidates = targetCandidates(index, name, ['variable']);
-  const functionId = functionEntity?.id;
   const visibleLocals = candidates.filter((entity) => {
     if (entity.sourcePath !== sourcePath || !isWithinDeclaredScope(entity, eventPath)) return false;
     const scope = entity.metadata.scope;
     const ownerFunction = entity.metadata.functionId;
-    if (scope === 'local') return functionId === undefined && ownerFunction === undefined;
+    // Event-sheet locals are scoped by indentation and remain visible inside
+    // function blocks nested in that indentation tree. Function locals and
+    // parameters are separately constrained to their owning function below.
+    if (scope === 'local') return ownerFunction === undefined;
     if (scope === 'function-local') return functionId !== undefined && ownerFunction === functionId;
     return false;
   });
@@ -144,7 +146,8 @@ function variableEntity(
   }
 
   if (functionId !== undefined) {
-    const parameters = candidates.filter((entity) => entity.metadata.scope === 'function-parameter'
+    const parameters = candidates.filter((entity) =>
+      (entity.metadata.scope === 'function-parameter' || entity.metadata.scope === 'custom-action-parameter')
       && entity.metadata.functionId === functionId);
     if (parameters.length === 1) return parameters[0];
     if (parameters.length > 1) return undefined;
@@ -226,7 +229,7 @@ function extractVariableExpressionReferences(
     }
 
     if (after === '.' || after === '(') continue;
-    const target = variableEntity(index, name, source.sourcePath, scope.eventPath, scope.functionEntity);
+    const target = variableEntity(index, name, source.sourcePath, scope.eventPath, scope.functionId);
     if (!target) continue;
     addReference(references, {
       sourceEntity: source,
@@ -310,6 +313,7 @@ function eventScope(
   eventPath: readonly number[],
   eventJsonPath: string,
   functionEntity?: ForgeEntity,
+  functionId?: string,
   functionSid?: string,
 ): EventScope {
   const eventSid = typeof node.sid === 'string' || typeof node.sid === 'number' ? String(node.sid) : undefined;
@@ -318,6 +322,7 @@ function eventScope(
     eventJsonPath,
     ...(eventSid ? { eventSid } : {}),
     ...(functionEntity ? { functionEntity } : {}),
+    ...(functionId ? { functionId } : {}),
     ...(functionSid ? { functionSid } : {}),
   };
 }
@@ -330,6 +335,7 @@ function extractEventSheetReferences(resource: ParsedResource, index: ProjectInd
     eventPath: readonly number[],
     eventJsonPath: string,
     parentFunction?: ForgeEntity,
+    parentFunctionId?: string,
     parentFunctionSid?: string,
   ): void => {
     if (!isRecord(node) || eventPath.length > 64) return;
@@ -343,8 +349,14 @@ function extractEventSheetReferences(resource: ParsedResource, index: ProjectInd
       : undefined;
     const functionEntity = declaredFunction ?? parentFunction;
     const ownSid = typeof node.sid === 'string' || typeof node.sid === 'number' ? String(node.sid) : undefined;
+    const customActionName = eventType === 'custom-ace-block'
+      && typeof node.aceName === 'string' ? node.aceName : undefined;
+    const customActionId = customActionName
+      ? `custom-action:${resource.entity.id}:${ownSid ?? eventPath.join('.')}`
+      : undefined;
+    const functionId = declaredFunction?.id ?? customActionId ?? parentFunctionId ?? functionEntity?.id;
     const functionSid = declaredFunction ? ownSid : parentFunctionSid;
-    const scope = eventScope(node, eventPath, eventJsonPath, functionEntity, functionSid);
+    const scope = eventScope(node, eventPath, eventJsonPath, functionEntity, functionId, functionSid);
     const source = functionEntity ?? resource.entity;
 
     if (eventType === 'include' && typeof node.includeSheet === 'string') {
@@ -395,7 +407,7 @@ function extractEventSheetReferences(resource: ParsedResource, index: ProjectInd
         && ((entryKind === 'action' && EVENT_VARIABLE_PARAMETER_ACTIONS.has(entryId))
           || (entryKind === 'condition' && EVENT_VARIABLE_PARAMETER_CONDITIONS.has(entryId)));
       if (isEventVariableReference && variableName) {
-        const target = variableEntity(index, variableName, resource.entity.sourcePath, scope.eventPath, functionEntity);
+        const target = variableEntity(index, variableName, resource.entity.sourcePath, scope.eventPath, scope.functionId);
         addReference(references, {
           sourceEntity: source,
           targetName: variableName,
@@ -486,6 +498,7 @@ function extractEventSheetReferences(resource: ParsedResource, index: ProjectInd
         [...eventPath, childIndex],
         `${eventJsonPath}.children[${childIndex}]`,
         functionEntity,
+        functionId,
         functionSid,
       ));
     }
@@ -516,10 +529,11 @@ export function extractProjectReferences(resources: readonly ParsedResource[], i
     extractEventSheetReferences(resource, index, references);
   }
 
-  const semanticPairs = new Set<string>();
+  const semanticOccurrences = new Set<string>();
   for (const reference of references.values()) {
-    if (reference.source !== 'exact-string-fallback' && reference.targetEntityId) {
-      semanticPairs.add(`${reference.sourcePath}:${reference.targetEntityId}`);
+    const jsonPath = reference.sourceLocation?.jsonPath;
+    if (reference.source !== 'exact-string-fallback' && reference.targetEntityId && jsonPath) {
+      semanticOccurrences.add(JSON.stringify([reference.sourcePath, reference.targetEntityId, jsonPath]));
     }
   }
 
@@ -528,7 +542,8 @@ export function extractProjectReferences(resources: readonly ParsedResource[], i
     exactStrings(resource.raw, (value, jsonPath) => {
       const matches = targetCandidates(index, value, FALLBACK_KINDS);
       for (const target of matches) {
-        if (target.id === resource.entity.id || semanticPairs.has(`${resource.entity.sourcePath}:${target.id}`)) continue;
+        const occurrenceKey = JSON.stringify([resource.entity.sourcePath, target.id, jsonPath]);
+        if (target.id === resource.entity.id || semanticOccurrences.has(occurrenceKey)) continue;
         addReference(references, {
           sourceEntity: resource.entity,
           targetName: target.name,

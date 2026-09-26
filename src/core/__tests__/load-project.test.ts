@@ -11,11 +11,13 @@ import {
   searchEntities,
 } from '../index';
 import type { ProjectFileSystem } from '../filesystem';
+import type { ForgeEntity } from '../types';
 
 const fixtureModules = {
   'sample-project': import.meta.glob<string>('../fixtures/sample-project/**/*', { eager: true, query: '?raw', import: 'default' }),
   'minimal-project': import.meta.glob<string>('../fixtures/minimal-project/**/*', { eager: true, query: '?raw', import: 'default' }),
   'semantic-project': import.meta.glob<string>('../fixtures/semantic-project/**/*', { eager: true, query: '?raw', import: 'default' }),
+  'construct-platformer': import.meta.glob<string>('../fixtures/construct-platformer/**/*', { eager: true, query: '?raw', import: 'default' }),
 };
 
 class MemoryProjectFileSystem implements ProjectFileSystem {
@@ -195,15 +197,33 @@ describe('Construct project core', () => {
     expect(searchEntities(analysis.index, 'kind:layout start').map((entity) => entity.name)).toEqual(['Start']);
   });
 
+  it('loads a licensed real Construct folder project without unresolved references', async () => {
+    const analysis = await loadProject(fixtureFileSystem('construct-platformer'));
+
+    expect(analysis.manifest.name).toBe('Platform abstraction');
+    expect(analysis.manifest.constructVersion).toBe('44002');
+    expect(analysis.stats.entitiesByKind).toMatchObject({ object: 9, layout: 1, eventSheet: 1, variable: 2 });
+    expect(analysis.references).toHaveLength(92);
+    expect(analysis.references.every((reference) => reference.targetEntityId)).toBe(true);
+    expect(analysis.dependencies).toHaveLength(24);
+    expect(analysis.dependencies.some((dependency) => dependency.occurrenceIds.length > 1)).toBe(true);
+    expect(analysis.diagnostics).toEqual([]);
+  });
+
   it('resolves Construct globals across sheets and respects nested local and function scopes', async () => {
     const analysis = await loadProject(fixtureFileSystem('semantic-project'));
     const byName = (name: string) => analysis.index.byKind.get('variable')?.find((entity) => entity.name === name);
     const coins = byName('coins');
     const groupDamage = byName('groupDamage');
     const nestedDamage = byName('nestedDamage');
+    const forwardLocal = byName('forwardLocal');
+    const branchLocal = byName('branchLocal');
     const amount = byName('amount');
     const functionLocal = byName('functionLocal');
     const nestedFunctionLocal = byName('nestedFunctionLocal');
+    const customAmount = byName('customAmount');
+    const customLocal = byName('customLocal');
+    const groupFunctionLocal = byName('groupFunctionLocal');
     const combatSheet = analysis.index.byKind.get('eventSheet')?.find((entity) => entity.name === 'Combat');
     const combatSourcePath = 'eventSheets/Gameplay/Combat.json';
 
@@ -230,9 +250,32 @@ describe('Construct project core', () => {
     const outsideGroupUses = analysis.references.filter((reference) =>
       reference.sourceLocation?.eventSid === '219' && reference.targetName === 'groupDamage');
     expect(outsideGroupUses.some((reference) => reference.targetEntityId === groupDamage?.id)).toBe(false);
+    expect(outsideGroupUses.some((reference) => reference.targetEntityId === forwardLocal?.id)).toBe(false);
+
+    const eventUsesVariable = (eventSid: string, variable: ForgeEntity | undefined) => analysis.references.some((reference) =>
+      reference.sourceLocation?.eventSid === eventSid && reference.targetEntityId === variable?.id);
+    expect(eventUsesVariable('241', forwardLocal)).toBe(true);
+    expect(eventUsesVariable('244', forwardLocal)).toBe(true);
+    expect(eventUsesVariable('246', forwardLocal)).toBe(true);
+    expect(eventUsesVariable('250', branchLocal)).toBe(true);
+    expect(eventUsesVariable('253', branchLocal)).toBe(false);
+    expect(customAmount?.metadata.scope).toBe('custom-action-parameter');
+    expect(customLocal?.metadata.scope).toBe('function-local');
+    expect(eventUsesVariable('283', customAmount)).toBe(true);
+    expect(eventUsesVariable('283', customLocal)).toBe(true);
+    expect(analysis.references.filter((reference) =>
+      ['291', '293'].includes(reference.sourceLocation?.eventSid ?? '')
+      && reference.relationship === 'event-variable-action'
+      && reference.targetEntityId === groupFunctionLocal?.id)).toHaveLength(2);
+    expect(analysis.references.some((reference) =>
+      reference.relationship === 'event-object-reference' && reference.targetName === 'Functions')).toBe(false);
 
     const award = analysis.index.byKind.get('function')?.find((entity) => entity.name === 'AwardCoins');
     expect(award?.id).toContain('sid:230');
+    expect(analysis.references.some((reference) =>
+      reference.sourceLocation?.eventSid === '283'
+      && reference.relationship === 'function-call'
+      && reference.targetEntityId === award?.id)).toBe(true);
     expect(analysis.references.some((reference) =>
       reference.sourceEntityId === award?.id && reference.targetEntityId === amount?.id)).toBe(true);
     expect(analysis.references.find((reference) =>
@@ -264,6 +307,10 @@ describe('Construct project core', () => {
     expect(coinExpressionReferences.filter((reference) => reference.sourceLocation?.eventSid === '201'
       && reference.sourceLocation?.entryKind === 'action')
       .map((reference) => reference.sourceLocation?.expressionRange?.start)).toEqual([0, 8]);
+    const repeatedActionOccurrences = coinExpressionReferences.filter((reference) =>
+      reference.sourceLocation?.eventSid === '201' && reference.sourceLocation?.entryKind === 'action');
+    expect(repeatedActionOccurrences).toHaveLength(2);
+    expect(new Set(repeatedActionOccurrences.map((reference) => reference.id)).size).toBe(2);
 
     const possibleFamilyMatches = analysis.references.filter((reference) =>
       reference.source === 'exact-string-fallback' && reference.targetName === 'Combatants');

@@ -84,6 +84,107 @@
                   "parameters": { "value": "nestedDamage + groupDamage" }
                 }
               ]
+            },
+            {
+              "eventType": "block",
+              "sid": 241,
+              "conditions": [],
+              "actions": [
+                {
+                  "id": "set-eventvar-value",
+                  "objectClass": "System",
+                  "sid": 242,
+                  "parameters": { "variable": "forwardLocal", "value": "forwardLocal + 1" }
+                }
+              ]
+            },
+            {
+              "eventType": "variable",
+              "name": "forwardLocal",
+              "type": "number",
+              "initialValue": "0",
+              "isStatic": false,
+              "isConstant": false,
+              "sid": 243
+            },
+            {
+              "eventType": "block",
+              "sid": 244,
+              "conditions": [],
+              "actions": [
+                {
+                  "id": "set-eventvar-value",
+                  "objectClass": "System",
+                  "sid": 245,
+                  "parameters": { "variable": "forwardLocal", "value": "forwardLocal + 1" }
+                }
+              ],
+              "children": [
+                {
+                  "eventType": "block",
+                  "sid": 246,
+                  "conditions": [],
+                  "actions": [
+                    {
+                      "id": "set-eventvar-value",
+                      "objectClass": "System",
+                      "sid": 247,
+                      "parameters": { "variable": "forwardLocal", "value": "forwardLocal + 1" }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "eventType": "block",
+              "sid": 248,
+              "conditions": [],
+              "actions": [],
+              "children": [
+                {
+                  "eventType": "variable",
+                  "name": "branchLocal",
+                  "type": "number",
+                  "initialValue": "0",
+                  "isStatic": false,
+                  "isConstant": false,
+                  "sid": 249
+                },
+                {
+                  "eventType": "block",
+                  "sid": 250,
+                  "conditions": [],
+                  "actions": [
+                    {
+                      "id": "set-eventvar-value",
+                      "objectClass": "System",
+                      "sid": 251,
+                      "parameters": { "variable": "branchLocal", "value": "branchLocal + 1" }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "eventType": "block",
+              "sid": 252,
+              "conditions": [],
+              "actions": [],
+              "children": [
+                {
+                  "eventType": "block",
+                  "sid": 253,
+                  "conditions": [],
+                  "actions": [
+                    {
+                      "id": "set-eventvar-value",
+                      "objectClass": "System",
+                      "sid": 254,
+                      "parameters": { "variable": "branchLocal", "value": "branchLocal + 1" }
+                    }
+                  ]
+                }
+              ]
             }
           ]
         },
@@ -180,6 +281,91 @@
               "objectClass": "System",
               "sid": 239,
               "parameters": { "value": "nestedFunctionLocal + functionLocal + amount" }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "eventType": "custom-ace-block",
+      "aceType": "action",
+      "aceName": "applyDamage",
+      "objectClass": "Player",
+      "functionDescription": "Apply damage to this player",
+      "functionParameters": [
+        { "name": "customAmount", "type": "number", "initialValue": "0", "sid": 281 }
+      ],
+      "sid": 280,
+      "conditions": [],
+      "actions": [],
+      "children": [
+        {
+          "eventType": "variable",
+          "name": "customLocal",
+          "type": "number",
+          "initialValue": "0",
+          "isStatic": false,
+          "isConstant": false,
+          "sid": 282
+        },
+        {
+          "eventType": "block",
+          "sid": 283,
+          "conditions": [],
+          "actions": [
+            {
+              "id": "set-eventvar-value",
+              "objectClass": "System",
+              "sid": 284,
+              "parameters": { "variable": "customAmount", "value": "customAmount + customLocal" }
+            },
+            {
+              "objectClass": "Functions",
+              "callFunction": "AwardCoins",
+              "parameters": {}
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "eventType": "group",
+      "title": "Grouped local visible to nested function",
+      "children": [
+        {
+          "eventType": "variable",
+          "name": "groupFunctionLocal",
+          "type": "string",
+          "initialValue": "",
+          "sid": 290
+        },
+        {
+          "eventType": "function-block",
+          "functionName": "UseGroupLocal",
+          "functionParameters": [],
+          "sid": 291,
+          "conditions": [],
+          "actions": [
+            {
+              "id": "set-eventvar-value",
+              "objectClass": "System",
+              "sid": 292,
+              "parameters": { "variable": "groupFunctionLocal", "value": "\"used\"" }
+            }
+          ],
+          "children": [
+            {
+              "eventType": "block",
+              "sid": 293,
+              "conditions": [],
+              "actions": [
+                {
+                  "id": "set-eventvar-value",
+                  "objectClass": "System",
+                  "sid": 294,
+                  "parameters": { "variable": "groupFunctionLocal", "value": "\"nested use\"" }
+                }
+              ]
             }
           ]
         }

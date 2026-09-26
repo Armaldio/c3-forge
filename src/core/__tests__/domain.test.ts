@@ -35,6 +35,36 @@ describe('Construct domain foundations', () => {
     expect(withoutSid.id).toBe(makeStableEntityId('object', withoutSid.sourcePath, withoutSid.name));
   });
 
+  it('deduplicates fallback matches by target and occurrence location', () => {
+    const player = createForgeEntity('object', 'Player', 'objectTypes/Player.json');
+    const sheet = createForgeEntity('eventSheet', 'Game Events', 'eventSheets/Game Events.json');
+    const index = createProjectIndex([player, sheet]);
+    const references = extractProjectReferences([
+      resource('eventSheet', sheet, {
+        events: [{
+          eventType: 'block',
+          sid: 10,
+          conditions: [],
+          actions: [{ objectClass: 'Player', id: 'destroy', parameters: {} }],
+        }],
+        notes: ['Player', 'Player'],
+      }),
+    ], index);
+
+    const semantic = references.filter((reference) =>
+      reference.targetEntityId === player.id && reference.source === 'semantic');
+    const fallbacks = references.filter((reference) =>
+      reference.targetEntityId === player.id && reference.source === 'exact-string-fallback');
+
+    expect(semantic).toHaveLength(1);
+    expect(semantic[0]?.sourceLocation?.jsonPath).toBe('$.events[0].actions[0].objectClass');
+    expect(fallbacks.map((reference) => reference.sourceLocation?.jsonPath).sort()).toEqual([
+      '$.notes[0]',
+      '$.notes[1]',
+    ]);
+    expect(new Set([...semantic, ...fallbacks].map((reference) => reference.id)).size).toBe(3);
+  });
+
   it('extracts structural references as semantic and exact-string matches only as low-confidence fallback', () => {
     const player = createForgeEntity('object', 'Player', 'objectTypes/Player.json')
     const enemy = createForgeEntity('object', 'Enemy', 'objectTypes/Enemy.json')
@@ -52,7 +82,7 @@ describe('Construct domain foundations', () => {
     const ghost = createForgeEntity('variable', 'ghostVariable', sheet.sourcePath, { scope: 'global', sheetName: sheet.name }, 'var:ghost')
     const localOnly = createForgeEntity('variable', 'localOnly', sheet.sourcePath, { scope: 'local', sheetName: sheet.name }, 'var:local-only')
     const otherSheetScore = createForgeEntity('variable', 'otherSheetLocal', 'eventSheets/Other Events.json', {
-      scope: 'local', sheetName: 'Other Events', eventPath: [0, 0], scopePath: [0], scopePosition: 0,
+      scope: 'local', sheetName: 'Other Events', eventPath: [0, 0], scopePath: [0],
     }, 'var:other-sheet-local')
     const index = createProjectIndex([
       player, enemy, family, sheet, layout, spawn, score, count, playerHealth, enemyHealth, team, ghost, localOnly, otherSheetScore,
@@ -99,8 +129,9 @@ describe('Construct domain foundations', () => {
     })
     expect(find(sheet, 'event-object-reference')?.targetEntityId).toBe(enemy.id)
     expect(find(spawn, 'function-call')?.targetEntityId).toBe(spawn.id)
-    expect(references.some((reference) => reference.relationship === 'exact-string-match'
-      && reference.targetEntityId === spawn.id)).toBe(false)
+    expect(references.some((reference) => reference.source === 'exact-string-fallback'
+      && reference.targetEntityId === spawn.id
+      && reference.sourceLocation?.jsonPath === '$.events[2].actions[0].callFunction')).toBe(false)
     expect(find(sheet, 'event-variable-action')).toMatchObject({
       targetEntityId: score.id,
       confidence: 'high',

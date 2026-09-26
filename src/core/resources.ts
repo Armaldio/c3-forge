@@ -69,7 +69,9 @@ function eventSemanticEntities(resource: ParsedResource): ForgeEntity[] {
   const sheetName = resource.entity.name;
 
   interface FunctionScope {
-    readonly entity: ForgeEntity;
+    readonly id: string;
+    readonly name: string;
+    readonly kind: 'function' | 'custom-action';
     readonly sid?: string;
   }
 
@@ -78,6 +80,7 @@ function eventSemanticEntities(resource: ParsedResource): ForgeEntity[] {
     const eventType = typeof node.eventType === 'string' ? node.eventType : '';
     const sid = sidOf(node);
     let nestedFunctionScope = functionScope;
+    let declaredFunctionScope: FunctionScope | undefined;
 
     if (eventType === 'function-block') {
       const name = stringProperty(node, 'functionName');
@@ -98,34 +101,46 @@ function eventSemanticEntities(resource: ParsedResource): ForgeEntity[] {
         if (parameters.length > 0) metadata.parameters = parameters;
         const functionEntity = createForgeEntity('function', name, resource.entity.sourcePath, metadata, eventPath.join('.'));
         entities.push(functionEntity);
-        nestedFunctionScope = { entity: functionEntity, ...(sid ? { sid } : {}) };
-
-        if (Array.isArray(node.functionParameters)) {
-          node.functionParameters.forEach((parameter, index) => {
-            if (!isRecord(parameter)) return;
-            const parameterName = stringProperty(parameter, 'name');
-            if (!parameterName) return;
-            const parameterSid = sidOf(parameter);
-            const parameterMetadata: Record<string, JsonValue> = {
-              sheetName,
-              functionName: name,
-              functionId: functionEntity.id,
-              ...(sid ? { functionSid: sid } : {}),
-              ...(parameterSid ? { sid: parameterSid } : {}),
-              scope: 'function-parameter',
-              ...scalarMetadata(parameter, ['type', 'initialValue', 'comment']),
-            };
-            entities.push(createForgeEntity(
-              'variable', parameterName, resource.entity.sourcePath, parameterMetadata,
-              `${functionEntity.id}:parameter:${parameterSid ?? index}`,
-            ));
-          });
-        }
+        nestedFunctionScope = { id: functionEntity.id, name, kind: 'function', ...(sid ? { sid } : {}) };
+        declaredFunctionScope = nestedFunctionScope;
       }
-    } else if (eventType === 'variable') {
+    } else if (eventType === 'custom-ace-block') {
+      const name = stringProperty(node, 'aceName');
+      if (name) {
+        const ownerId = `custom-action:${resource.entity.id}:${sid ?? eventPath.join('.')}`;
+        nestedFunctionScope = { id: ownerId, name, kind: 'custom-action', ...(sid ? { sid } : {}) };
+        declaredFunctionScope = nestedFunctionScope;
+      }
+    }
+
+    if (declaredFunctionScope && Array.isArray(node.functionParameters)) {
+      node.functionParameters.forEach((parameter, index) => {
+        if (!isRecord(parameter)) return;
+        const parameterName = stringProperty(parameter, 'name');
+        if (!parameterName) return;
+        const parameterSid = sidOf(parameter);
+        const parameterMetadata: Record<string, JsonValue> = {
+          sheetName,
+          functionName: declaredFunctionScope.name,
+          functionId: declaredFunctionScope.id,
+          ...(declaredFunctionScope.kind === 'function' && declaredFunctionScope.sid
+            ? { functionSid: declaredFunctionScope.sid } : {}),
+          ...(declaredFunctionScope.kind === 'custom-action' ? { customActionName: declaredFunctionScope.name } : {}),
+          ...(parameterSid ? { sid: parameterSid } : {}),
+          scope: declaredFunctionScope.kind === 'function' ? 'function-parameter' : 'custom-action-parameter',
+          ...scalarMetadata(parameter, ['type', 'initialValue', 'comment']),
+        };
+        entities.push(createForgeEntity(
+          'variable', parameterName, resource.entity.sourcePath, parameterMetadata,
+          `${declaredFunctionScope.id}:parameter:${parameterSid ?? index}`,
+        ));
+      });
+    }
+
+    if (eventType === 'variable') {
       const name = stringProperty(node, 'name');
       if (name) {
-        const scope = functionScope ? 'function-local' : eventPath.length === 1 ? 'global' : 'local';
+        const scope = nestedFunctionScope ? 'function-local' : eventPath.length === 1 ? 'global' : 'local';
         const variableMetadata: Record<string, JsonValue> = {
           ...(sid ? { sid } : {}),
           sheetName,
@@ -133,12 +148,13 @@ function eventSemanticEntities(resource: ParsedResource): ForgeEntity[] {
           ...(scope === 'local' || scope === 'function-local' ? {
             eventPath: [...eventPath],
             scopePath: eventPath.slice(0, -1),
-            scopePosition: eventPath.at(-1) ?? 0,
           } : {}),
-          ...(functionScope ? {
-            functionName: functionScope.entity.name,
-            functionId: functionScope.entity.id,
-            ...(functionScope.sid ? { functionSid: functionScope.sid } : {}),
+          ...(nestedFunctionScope ? {
+            functionName: nestedFunctionScope.name,
+            functionId: nestedFunctionScope.id,
+            ...(nestedFunctionScope.kind === 'function' && nestedFunctionScope.sid
+              ? { functionSid: nestedFunctionScope.sid } : {}),
+            ...(nestedFunctionScope.kind === 'custom-action' ? { customActionName: nestedFunctionScope.name } : {}),
           } : {}),
           ...scalarMetadata(node, ['type', 'initialValue', 'isStatic', 'isConstant', 'comment']),
         };
