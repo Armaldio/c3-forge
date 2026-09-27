@@ -81,6 +81,13 @@ export function createAnalysisStats(
     variable: 0,
     addon: 0,
     asset: 0,
+    layoutLayer: 0,
+    layoutInstance: 0,
+    event: 0,
+    behavior: 0,
+    animation: 0,
+    animationFrame: 0,
+    projectFolder: 0,
     projectFile: 0,
   } satisfies Record<EntityKind, number>;
   for (const entity of entities) entitiesByKind[entity.kind] += 1;

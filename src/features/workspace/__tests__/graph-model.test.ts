@@ -29,6 +29,7 @@ function analysis(entities: readonly ForgeEntity[], dependencies: readonly Proje
       projectFile: 'project.c3proj',
       name: 'Graph fixture',
       resources: [],
+      folders: [],
       addons: [],
       metadata: {},
     },
@@ -45,6 +46,7 @@ function analysis(entities: readonly ForgeEntity[], dependencies: readonly Proje
       entitiesByKind: {
         object: 0, family: 0, layout: 0, eventSheet: 0, timeline: 0,
         flowchart: 0, function: 0, variable: 0, addon: 0, asset: 0, projectFile: 0,
+        layoutLayer: 0, layoutInstance: 0, event: 0, behavior: 0, animation: 0, animationFrame: 0, projectFolder: 0,
       },
       totalReferences: 0,
       totalDependencies: dependencies.length,
@@ -117,5 +119,41 @@ describe('relationship graph model', () => {
     })
     expect(model.nodes.map((node) => node.entity.id)).toEqual([unused.id])
     expect(model.edges).toEqual([])
+  })
+
+  it('shows structure edges when their endpoint kinds and relationships are enabled', () => {
+    const layout = entity('layout', 'Main')
+    const layer = entity('layoutLayer', 'World')
+    const instance = entity('layoutInstance', 'Player (1)')
+    const player = entity('object', 'Player')
+    const asset = entity('asset', 'playeranim-walk-000')
+    const frame = entity('animationFrame', 'Walk · 1')
+    const folder = entity('projectFolder', 'World')
+    const childFolder = entity('projectFolder', 'Caves')
+    const project = analysis([layout, layer, instance, player, asset, frame, folder, childFolder], [
+      dependency(layout, layer, 'layout-layer'),
+      dependency(layer, instance, 'layer-instance'),
+      dependency(instance, player, 'layout-instance-type'),
+      dependency(frame, asset, 'frame-image'),
+      dependency(folder, childFolder, 'folder-child'),
+    ])
+    const model = buildGraphModel(project, {
+      entityKinds: ['layout', 'layoutLayer', 'layoutInstance', 'object', 'animationFrame', 'asset', 'projectFolder'],
+      relationships: ['layout-layer', 'layer-instance', 'layout-instance-type', 'frame-image', 'folder-child'],
+      mode: 'project',
+      focusHops: 1,
+    })
+    const defaults = buildGraphModel(project, {
+      entityKinds,
+      relationships: ['layout-layer', 'layer-instance', 'layout-instance-type', 'frame-image', 'folder-child'],
+      mode: 'project',
+      focusHops: 1,
+    })
+
+    expect(model.edges.map((edge) => edge.dependency.relationship).sort()).toEqual([
+      'layout-layer', 'layer-instance', 'layout-instance-type', 'frame-image', 'folder-child',
+    ].sort())
+    expect(model.nodes).toHaveLength(8)
+    expect(defaults.edges).toEqual([])
   })
 })

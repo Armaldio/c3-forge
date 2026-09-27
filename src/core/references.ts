@@ -107,6 +107,26 @@ function addRelationship(
   });
 }
 
+function addKnownRelationship(
+  collector: RelationshipCollector,
+  source: ForgeEntity,
+  target: ForgeEntity,
+  relationship: RelationshipKind,
+  sourceLocation: ReferenceSourceLocation,
+): void {
+  const id = [source.id, relationship, target.id, JSON.stringify(sourceLocation)]
+    .map((part) => encodeURIComponent(part))
+    .join(':');
+  collector.references.set(id, {
+    id,
+    sourceEntityId: source.id,
+    targetEntityId: target.id,
+    relationship,
+    sourcePath: source.sourcePath,
+    sourceLocation,
+  });
+}
+
 function numberPath(metadata: Readonly<Record<string, unknown>>, key: string): readonly number[] | undefined {
   const value = metadata[key];
   if (!Array.isArray(value)) return undefined;
@@ -461,26 +481,92 @@ function extractFamilyRelationships(resource: ParsedResource, index: ProjectInde
   });
 }
 
+function extractStructureRelationships(resource: ParsedResource, index: ProjectIndex, collector: RelationshipCollector): void {
+  const owned = (kind: EntityKind) => (index.byKind.get(kind) ?? [])
+    .filter((entity) => entity.metadata.ownerEntityId === resource.entity.id);
+
+  if (resource.descriptor.kind === 'eventSheet') {
+    const events = owned('event');
+    const byId = new Map(events.map((event) => [event.id, event]));
+    for (const event of events) {
+      const parentId = typeof event.metadata.parentEventId === 'string' ? event.metadata.parentEventId : undefined;
+      const parent = parentId ? byId.get(parentId) : undefined;
+      const eventPath = typeof event.metadata.jsonPath === 'string' ? event.metadata.jsonPath : undefined;
+      addKnownRelationship(collector, parent ?? resource.entity, event, parent ? 'event-child' : 'event-sheet-event',
+        eventPath ? {
+          ...(typeof event.metadata.sid === 'string' ? { eventSid: event.metadata.sid } : {}),
+          jsonPath: eventPath,
+        } : {});
+
+      if (event.metadata.eventType === 'function-block') {
+        addRelationship(collector, event, 'event-defines-function', event.name,
+          resolveTarget(index, event.name, ['function']), eventPath ? {
+            ...(typeof event.metadata.sid === 'string' ? { eventSid: event.metadata.sid } : {}),
+            eventPath,
+            jsonPath: `${eventPath}.functionName`,
+          } : {});
+      }
+    }
+  }
+
+  if (resource.descriptor.kind === 'object') {
+    for (const behavior of owned('behavior')) {
+      addKnownRelationship(collector, resource.entity, behavior, 'behavior-attachment',
+        typeof behavior.metadata.jsonPath === 'string' ? { jsonPath: behavior.metadata.jsonPath } : {});
+    }
+    const animations = owned('animation');
+    const frames = owned('animationFrame');
+    for (const animation of animations) {
+      addKnownRelationship(collector, resource.entity, animation, 'object-animation',
+        typeof animation.metadata.jsonPath === 'string' ? { jsonPath: animation.metadata.jsonPath } : {});
+    }
+    for (const frame of frames) {
+      const animationId = typeof frame.metadata.animationEntityId === 'string' ? frame.metadata.animationEntityId : undefined;
+      const animation = animationId ? index.byId.get(animationId) : undefined;
+      const framePath = typeof frame.metadata.jsonPath === 'string' ? frame.metadata.jsonPath : undefined;
+      if (animation) addKnownRelationship(collector, animation, frame, 'animation-frame', framePath ? { jsonPath: framePath } : {});
+
+      const animationName = typeof frame.metadata.animationName === 'string' ? frame.metadata.animationName : undefined;
+      const frameIndex = typeof frame.metadata.frameIndex === 'number' ? frame.metadata.frameIndex : undefined;
+      const fileType = typeof frame.metadata.fileType === 'string' ? frame.metadata.fileType : undefined;
+      if (!animationName || frameIndex === undefined || fileType !== 'image/png'
+        || !/^[a-z0-9 _-]+$/i.test(resource.entity.name)
+        || !/^[a-z0-9 _-]+$/i.test(animationName)) continue;
+      const expectedPath = `images/${resource.entity.name.toLowerCase()}-${animationName.toLowerCase()}-${String(frameIndex).padStart(3, '0')}.png`;
+      const matchingAssets = (index.bySourcePath.get(expectedPath) ?? []).filter((entity) => entity.kind === 'asset');
+      const resolution: Resolution<ForgeEntity> = matchingAssets.length === 1
+        ? { status: 'resolved', value: matchingAssets[0] as ForgeEntity }
+        : matchingAssets.length > 1
+          ? { status: 'ambiguous', candidates: matchingAssets }
+          : { status: 'missing' };
+      addRelationship(collector, frame, 'frame-image', expectedPath, resolution,
+        framePath ? { jsonPath: framePath } : {});
+    }
+  }
+
+}
+
 function extractLayoutRelationships(resource: ParsedResource, index: ProjectIndex, collector: RelationshipCollector): void {
   if (resource.descriptor.kind !== 'layout' || !isRecord(resource.raw)) return;
-  const visitLayer = (layer: unknown, path: string, depth: number): void => {
-    if (!isRecord(layer) || depth > 48) return;
-    if (Array.isArray(layer.instances)) {
-      layer.instances.forEach((instance, instanceIndex) => {
-        if (!isRecord(instance) || typeof instance.type !== 'string') return;
-        addRelationship(collector, resource.entity, 'layout-instance', instance.type,
-          resolveTarget(index, instance.type, EVENT_REFERENCE_KINDS),
-          { jsonPath: `${path}.instances[${instanceIndex}].type` });
-      });
-    }
-    for (const key of ['subLayers', 'layers']) {
-      const nestedLayers = layer[key];
-      if (!Array.isArray(nestedLayers)) continue;
-      nestedLayers.forEach((nested, childIndex) => visitLayer(nested, `${path}.${key}[${childIndex}]`, depth + 1));
-    }
-  };
-  if (Array.isArray(resource.raw.layers)) {
-    resource.raw.layers.forEach((layer, layerIndex) => visitLayer(layer, `$.layers[${layerIndex}]`, 0));
+  const layers = (index.byKind.get('layoutLayer') ?? []).filter((entity) => entity.metadata.ownerEntityId === resource.entity.id);
+  const instances = (index.byKind.get('layoutInstance') ?? []).filter((entity) => entity.metadata.ownerEntityId === resource.entity.id);
+  const layerByPath = new Map(layers.flatMap((layer) => typeof layer.metadata.layerPath === 'string'
+    ? [[layer.metadata.layerPath, layer] as const] : []));
+  for (const layer of layers) {
+    const path = typeof layer.metadata.layerPath === 'string' ? layer.metadata.layerPath : '';
+    const parentMatch = /^(.*)\.(?:subLayers|layers)\[\d+\]$/.exec(path);
+    const parent = parentMatch?.[1] ? layerByPath.get(parentMatch[1]) : undefined;
+    addKnownRelationship(collector, parent ?? resource.entity, layer, parent ? 'layer-child' : 'layout-layer', {
+      jsonPath: path,
+    });
+  }
+  for (const instance of instances) {
+    const layer = typeof instance.metadata.layerEntityId === 'string' ? index.byId.get(instance.metadata.layerEntityId) : undefined;
+    const instancePath = typeof instance.metadata.jsonPath === 'string' ? instance.metadata.jsonPath : undefined;
+    if (layer) addKnownRelationship(collector, layer, instance, 'layer-instance', instancePath ? { jsonPath: instancePath } : {});
+    const type = typeof instance.metadata.objectType === 'string' ? instance.metadata.objectType : undefined;
+    if (type) addRelationship(collector, instance, 'layout-instance-type', type,
+      resolveTarget(index, type, EVENT_REFERENCE_KINDS), instancePath ? { jsonPath: `${instancePath}.type` } : {});
   }
   if (typeof resource.raw.eventSheet === 'string') {
     addRelationship(collector, resource.entity, 'layout-event-sheet', resource.raw.eventSheet,
@@ -646,7 +732,22 @@ export function extractProjectRelationships(resources: readonly ParsedResource[]
   for (const resource of resources) {
     extractFamilyRelationships(resource, index, collector);
     extractLayoutRelationships(resource, index, collector);
+    extractStructureRelationships(resource, index, collector);
     extractEventSheetRelationships(resource, index, collector, memberships);
+  }
+  const folders = index.byKind.get('projectFolder') ?? [];
+  for (const folder of folders) {
+    const parentPath = folder.sourcePath.slice(0, folder.sourcePath.lastIndexOf('/'));
+    const parent = folders.find((candidate) => candidate.sourcePath === parentPath);
+    if (parent) addKnownRelationship(collector, parent, folder, 'folder-child', {});
+  }
+  for (const resource of resources) {
+    const sourceDirectory = resource.entity.sourcePath.slice(0, resource.entity.sourcePath.lastIndexOf('/'));
+    for (const folder of index.byKind.get('projectFolder') ?? []) {
+      if (folder.sourcePath === sourceDirectory) {
+        addKnownRelationship(collector, folder, resource.entity, 'folder-resource', {});
+      }
+    }
   }
   return {
     references: [...collector.references.values()],

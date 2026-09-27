@@ -13,6 +13,13 @@ const METADATA_KEYS: Readonly<Record<EntityKind, readonly string[]>> = {
   variable: ['sid', 'variableType', 'sheetName', 'objectName'],
   addon: ['pluginId', 'version'],
   asset: ['extension', 'size'],
+  layoutLayer: ['sid', 'ownerEntityId', 'layerPath'],
+  layoutInstance: ['sid', 'uid', 'ownerEntityId', 'layerEntityId', 'objectType', 'position'],
+  event: ['sid', 'ownerEntityId', 'parentEventId', 'eventType', 'jsonPath'],
+  behavior: ['sid', 'ownerEntityId', 'behaviorId'],
+  animation: ['sid', 'ownerEntityId', 'animationName'],
+  animationFrame: ['sid', 'ownerEntityId', 'animationEntityId', 'frameIndex', 'imageSpriteId', 'fileType'],
+  projectFolder: ['folderPath'],
   projectFile: ['constructVersion'],
 };
 

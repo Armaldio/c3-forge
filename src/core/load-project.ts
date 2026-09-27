@@ -1,6 +1,6 @@
 import type { ProjectFileSystem } from './filesystem';
 import { createAnalysisStats, createProjectDiagnostics } from './diagnostics';
-import { entityForProjectFile } from './entities';
+import { createForgeEntity, entityForProjectFile } from './entities';
 import { parseProjectManifestResult, type ManifestParseResult } from './manifest';
 import { createProjectIndex } from './project-index';
 import { createProjectDependencies, createReferenceIndexes, extractProjectRelationships } from './references';
@@ -49,7 +49,11 @@ export async function loadProject(filesystem: ProjectFileSystem, options?: Proje
 
   report(options, 'load-resources');
   const loaded = await loadManifestResources(filesystem, parsedManifest.manifest, () => report(options, 'parse'));
-  const entities = [entityForProjectFile(parsedManifest.manifest.name), ...loaded.entities];
+  const folderEntities = parsedManifest.manifest.folders.map((folder) => {
+    const label = folder.path.split('/').at(-1) ?? folder.path;
+    return createForgeEntity('projectFolder', label, folder.path, { folderPath: folder.path });
+  });
+  const entities = [entityForProjectFile(parsedManifest.manifest.name), ...folderEntities, ...loaded.entities];
   // Resources are parsed independently so a malformed file does not stop other resources.
   const allIssues: ResourceIssue[] = [...parsedManifest.issues, ...loaded.issues];
 

@@ -15,10 +15,10 @@ const emit = defineEmits<{
 const explorerRoot = ref<HTMLElement | null>(null)
 
 const kindGroups: readonly { label: string; kinds: readonly EntityKind[] }[] = [
-  { label: 'Objects', kinds: ['object', 'family'] },
-  { label: 'Scenes', kinds: ['layout', 'eventSheet', 'timeline', 'flowchart'] },
-  { label: 'Logic & data', kinds: ['function', 'variable'] },
-  { label: 'Project files', kinds: ['addon', 'asset', 'projectFile'] },
+  { label: 'Objects', kinds: ['object', 'family', 'behavior', 'animation', 'animationFrame'] },
+  { label: 'Scenes', kinds: ['layout', 'layoutLayer', 'layoutInstance', 'eventSheet', 'timeline', 'flowchart'] },
+  { label: 'Logic & data', kinds: ['function', 'variable', 'event'] },
+  { label: 'Project files', kinds: ['projectFolder', 'addon', 'asset', 'projectFile'] },
 ]
 
 const groups = computed(() => kindGroups.map((group) => ({

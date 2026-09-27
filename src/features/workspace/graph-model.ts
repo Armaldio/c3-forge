@@ -1,10 +1,13 @@
 import { RELATIONSHIP_KINDS, type EntityKind, type ForgeEntity, type ProjectAnalysis, type ProjectDependency, type RelationshipKind } from '../../core/types'
 
-export type GraphEntityKind = Extract<EntityKind, 'eventSheet' | 'function' | 'object' | 'family' | 'layout' | 'variable'>
+export type GraphEntityKind = Extract<EntityKind,
+  'eventSheet' | 'function' | 'object' | 'family' | 'layout' | 'variable' | 'layoutLayer'
+  | 'layoutInstance' | 'event' | 'behavior' | 'animation' | 'animationFrame' | 'asset' | 'projectFolder'>
 export type GraphMode = 'project' | 'focus'
 
 export const graphEntityKinds: readonly GraphEntityKind[] = [
   'eventSheet', 'function', 'object', 'family', 'layout', 'variable',
+  'layoutLayer', 'layoutInstance', 'event', 'behavior', 'animation', 'animationFrame', 'asset', 'projectFolder',
 ]
 
 export const graphRelationshipKinds: readonly RelationshipKind[] = RELATIONSHIP_KINDS
@@ -49,6 +52,14 @@ const KIND_RANK: Readonly<Record<GraphEntityKind, number>> = {
   object: 1,
   function: 2,
   variable: 3,
+  projectFolder: 0,
+  layoutLayer: 1,
+  layoutInstance: 3,
+  event: 3,
+  behavior: 2,
+  animation: 2,
+  animationFrame: 3,
+  asset: 4,
 }
 
 const NODE_WIDTH = 208

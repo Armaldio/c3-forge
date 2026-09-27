@@ -26,6 +26,13 @@ export const entityKindLabel: Readonly<Record<EntityKind, string>> = {
   variable: 'Variable',
   addon: 'Add-on',
   asset: 'Asset',
+  layoutLayer: 'Layout layer',
+  layoutInstance: 'Layout instance',
+  event: 'Event block',
+  behavior: 'Behavior',
+  animation: 'Animation',
+  animationFrame: 'Animation frame',
+  projectFolder: 'Project folder',
   projectFile: 'Project file',
 }
 
@@ -40,6 +47,13 @@ export const entityKindPluralLabel: Readonly<Record<EntityKind, string>> = {
   variable: 'Variables',
   addon: 'Add-ons',
   asset: 'Assets',
+  layoutLayer: 'Layout layers',
+  layoutInstance: 'Layout instances',
+  event: 'Event blocks',
+  behavior: 'Behaviors',
+  animation: 'Animations',
+  animationFrame: 'Animation frames',
+  projectFolder: 'Project folders',
   projectFile: 'Project files',
 }
 

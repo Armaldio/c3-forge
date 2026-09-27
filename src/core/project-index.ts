@@ -2,7 +2,8 @@ import type { EntityKind, ForgeEntity, ProjectIndex } from './types';
 import type { JsonValue } from './types';
 
 const ENTITY_KINDS: readonly EntityKind[] = [
-  'object', 'family', 'layout', 'eventSheet', 'timeline', 'flowchart', 'function', 'variable', 'addon', 'asset', 'projectFile',
+  'object', 'family', 'layout', 'eventSheet', 'timeline', 'flowchart', 'function', 'variable', 'addon', 'asset',
+  'layoutLayer', 'layoutInstance', 'event', 'behavior', 'animation', 'animationFrame', 'projectFolder', 'projectFile',
 ];
 
 function isJsonArray(value: JsonValue): value is readonly JsonValue[] {

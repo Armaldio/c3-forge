@@ -92,8 +92,13 @@ function readFixtureTree(name: keyof typeof fixtureModules): Map<string, Uint8Ar
   return files;
 }
 
-function fixtureFileSystem(name: keyof typeof fixtureModules): MemoryProjectFileSystem {
-  return new MemoryProjectFileSystem(name, readFixtureTree(name));
+function fixtureFileSystem(
+  name: keyof typeof fixtureModules,
+  editFiles?: (files: Map<string, Uint8Array>) => void,
+): MemoryProjectFileSystem {
+  const files = readFixtureTree(name);
+  editFiles?.(files);
+  return new MemoryProjectFileSystem(name, files);
 }
 
 describe('Construct project core', () => {
@@ -113,6 +118,7 @@ describe('Construct project core', () => {
       'files/badge.png',
     ]);
     expect(normalized.resources[1]?.name).toBe('Player.v2');
+    expect(normalized.folders).toContainEqual({ kind: 'projectFolder', path: 'objectTypes/World' });
     expect(normalized.constructVersion).toBe('r400');
     expect(normalized.addons[0]?.id).toBe('addon.id');
     expect(normalizeProjectPath('objectTypes\\World\\Enemy.json')).toBe('objectTypes/World/Enemy.json');
@@ -151,18 +157,29 @@ describe('Construct project core', () => {
     expect(analysis.index.byKind.get('layout')?.map((entity) => entity.name)).toEqual(['Main', 'Title Screen']);
     expect(analysis.index.byKind.get('object')?.map((entity) => entity.name)).toEqual(['Player', 'Enemy']);
     expect(analysis.index.byName.get('player')?.[0]?.sourcePath).toBe('objectTypes/Player.json');
-    expect(analysis.index.bySourcePath.get('layouts/Main.json')).toHaveLength(1);
+    expect(analysis.index.bySourcePath.get('layouts/Main.json')?.filter((entity) => entity.kind === 'layout')).toHaveLength(1);
 
     const relationships = analysis.references.map((reference) => [
       reference.relationship,
       analysis.index.byId.get(reference.targetEntityId)?.name,
     ]);
     expect(relationships).toContainEqual(['layout-event-sheet', 'Game Events']);
-    expect(relationships).toContainEqual(['layout-instance', 'Player']);
-    expect(relationships).toContainEqual(['layout-instance', 'Enemy']);
+    expect(relationships).toContainEqual(['layout-instance-type', 'Player']);
+    expect(relationships).toContainEqual(['layout-instance-type', 'Enemy']);
+    expect(relationships).toContainEqual(['layout-layer', 'World']);
+    expect(relationships).toContainEqual(['layer-child', 'Enemies']);
+    expect(relationships).toContainEqual(['layer-instance', 'Player (1)']);
     expect(relationships).toContainEqual(['family-member', 'Player']);
     expect(relationships).toContainEqual(['event-sheet-include', 'Shared Events']);
     expect(relationships).toContainEqual(['function-call', 'Spawn']);
+    expect(relationships).toContainEqual(['event-defines-function', 'Spawn']);
+    expect(relationships).toContainEqual(['event-sheet-event', 'block']);
+    const functionEvent = (analysis.index.byKind.get('event') ?? []).find((entity) => entity.metadata.eventType === 'function-block');
+    expect(functionEvent?.id).toContain(encodeURIComponent(String(functionEvent?.metadata.sid)));
+    expect(analysis.references.some((reference) => reference.relationship === 'event-defines-function'
+      && reference.sourceEntityId === functionEvent?.id
+      && reference.sourceLocation?.eventSid === '411'
+      && reference.sourceLocation.jsonPath === '$.events[3].functionName')).toBe(true);
     expect(analysis.unresolvedReferences).toContainEqual(expect.objectContaining({
       relationship: 'event-sheet-include',
       targetName: 'Missing Events',
@@ -184,6 +201,17 @@ describe('Construct project core', () => {
     expect(analysis.index.byKind.get('asset')?.some((entity) => entity.sourcePath === 'images/player-frame.png')).toBe(true);
     expect(analysis.index.byKind.get('addon')?.some((entity) => entity.name === 'Fixture plugin')).toBe(true);
     expect(analysis.stats.entitiesByKind.layout).toBe(2);
+    const worldFolder = analysis.index.byKind.get('projectFolder')?.find((entity) => entity.sourcePath === 'objectTypes/World');
+    const cavesFolder = analysis.index.byKind.get('projectFolder')?.find((entity) => entity.sourcePath === 'objectTypes/World/Caves');
+    const nestedEnemy = analysis.index.byKind.get('object')?.find((entity) => entity.sourcePath === 'objectTypes/World/Enemy.json');
+    expect(worldFolder).toBeDefined();
+    expect(cavesFolder).toBeDefined();
+    expect(analysis.references.some((reference) => reference.relationship === 'folder-resource'
+      && reference.sourceEntityId === worldFolder?.id && reference.targetEntityId === nestedEnemy?.id)).toBe(true);
+    expect(analysis.references.some((reference) => reference.relationship === 'folder-child'
+      && reference.sourceEntityId === worldFolder?.id && reference.targetEntityId === cavesFolder?.id)).toBe(true);
+    expect(analysis.references.some((reference) => reference.relationship === 'folder-resource'
+      && reference.sourceEntityId === cavesFolder?.id && reference.targetEntityId === nestedEnemy?.id)).toBe(false);
     expect(analysis.stats.entitiesByKind.variable).toBe(6);
     expect(searchEntities(analysis.index, 'kind:function sheet:"Game Events"').map((entity) => entity.name)).toEqual(['Spawn']);
     expect(stages).toEqual(['validate', 'read-manifest', 'load-resources', 'parse', 'index', 'references', 'diagnostics', 'ready']);
@@ -206,15 +234,82 @@ describe('Construct project core', () => {
 
   it('loads a licensed real Construct folder project without unresolved references', async () => {
     const analysis = await loadProject(fixtureFileSystem('construct-platformer'));
+    expect({ entities: analysis.stats.totalEntities, references: analysis.stats.totalReferences, dependencies: analysis.stats.totalDependencies })
+      .toEqual({ entities: 154, references: 207, dependencies: 171 });
 
     expect(analysis.manifest.name).toBe('Platform abstraction');
     expect(analysis.manifest.constructVersion).toBe('44002');
     expect(analysis.stats.entitiesByKind).toMatchObject({ object: 9, layout: 1, eventSheet: 1, variable: 2 });
     expect(analysis.references.every((reference) => analysis.index.byId.has(reference.targetEntityId))).toBe(true);
-    expect(analysis.dependencies.length).toBeLessThan(24);
+    expect(analysis.dependencies.length).toBeGreaterThan(24);
     expect(analysis.dependencies.some((dependency) => dependency.occurrenceIds.length > 1)).toBe(true);
     expect(analysis.unresolvedReferences).toEqual([]);
     expect(analysis.diagnostics).toEqual([]);
+
+    const layout = analysis.index.byKind.get('layout')?.[0];
+    const layoutLayers = analysis.index.byKind.get('layoutLayer') ?? [];
+    const layoutInstances = analysis.index.byKind.get('layoutInstance') ?? [];
+    expect(layoutLayers.length).toBeGreaterThan(0);
+    expect(layoutInstances.some((instance) => instance.metadata.uid !== undefined && instance.metadata.position !== undefined)).toBe(true);
+    expect(analysis.references.some((reference) => reference.sourceEntityId === layout?.id && reference.relationship === 'layout-layer')).toBe(true);
+    expect(analysis.references.some((reference) => reference.relationship === 'layer-instance')).toBe(true);
+    expect(analysis.references.some((reference) => reference.relationship === 'layout-instance-type')).toBe(true);
+
+    const objectNames = analysis.index.byKind.get('object')?.map((entity) => entity.name) ?? [];
+    expect(objectNames).toContain('PlayerAnim');
+    expect(analysis.index.byKind.get('behavior')?.some((entity) => entity.name === 'Flash')).toBe(true);
+    expect(analysis.references.some((reference) => reference.relationship === 'behavior-attachment')).toBe(true);
+    expect(analysis.index.byKind.get('animation')?.some((entity) => entity.name === 'walk')).toBe(true);
+    expect(analysis.index.byKind.get('animationFrame')?.length).toBeGreaterThan(0);
+    expect(analysis.references.some((reference) => reference.relationship === 'object-animation')).toBe(true);
+    expect(analysis.references.some((reference) => reference.relationship === 'animation-frame')).toBe(true);
+    expect(analysis.references.some((reference) => reference.relationship === 'frame-image'
+      && analysis.index.byId.get(reference.targetEntityId)?.sourcePath === 'images/playeranim-walk-000.png'
+      && reference.sourceLocation?.jsonPath === '$.animations.items[0].frames[0]')).toBe(true);
+    expect(analysis.index.byKind.get('event')?.length).toBeGreaterThan(0);
+    expect(analysis.references.some((reference) => reference.relationship === 'event-child')).toBe(true);
+    expect(analysis.index.byKind.get('event')?.some((entity) => entity.metadata.sid === '374483578434910')).toBe(true);
+    const frames = analysis.index.byKind.get('animationFrame') ?? [];
+    expect(new Set(frames.map((frame) => frame.id)).size).toBe(frames.length);
+    const walkFrame = frames.find((frame) => frame.name === 'walk · 1');
+    expect(walkFrame).toMatchObject({
+      metadata: { jsonPath: '$.animations.items[0].frames[0]', frameIndex: 0, imageSpriteId: '3' },
+    });
+  });
+
+  it('reports a missing deterministically named PNG frame image and creates no image edge', async () => {
+    const analysis = await loadProject(fixtureFileSystem('construct-platformer', (files) => {
+      files.delete('images/playeranim-walk-000.png');
+      files.set('images/unrelated/playeranim-walk-000.png', new Uint8Array([1]));
+    }));
+    expect(analysis.references.some((reference) => reference.relationship === 'frame-image'
+      && analysis.index.byId.get(reference.targetEntityId)?.sourcePath === 'images/playeranim-walk-000.png')).toBe(false);
+    expect(analysis.unresolvedReferences).toContainEqual(expect.objectContaining({
+      relationship: 'frame-image',
+      targetName: 'images/playeranim-walk-000.png',
+      resolution: 'missing',
+    }));
+  });
+
+  it('reports ambiguous function definition names instead of choosing one', async () => {
+    const analysis = await loadProject(fixtureFileSystem('semantic-project', (files) => {
+      const path = 'eventSheets/Gameplay/Combat.json';
+      const source = files.get(path);
+      if (!source) throw new Error(`Missing fixture file: ${path}`);
+      const sheet = JSON.parse(new TextDecoder().decode(source)) as { events: unknown[] };
+      sheet.events.push({ eventType: 'function-block', functionName: 'AwardCoins', sid: 999001, conditions: [], actions: [] });
+      files.set(path, new TextEncoder().encode(JSON.stringify(sheet)));
+    }));
+    const ambiguousFunctionEventIds = new Set((analysis.index.byKind.get('event') ?? [])
+      .filter((entity) => entity.name === 'AwardCoins').map((entity) => entity.id));
+    expect(analysis.references.some((reference) => reference.relationship === 'event-defines-function'
+      && ambiguousFunctionEventIds.has(reference.sourceEntityId))).toBe(false);
+    expect(analysis.unresolvedReferences).toContainEqual(expect.objectContaining({
+      relationship: 'event-defines-function',
+      targetName: 'AwardCoins',
+      resolution: 'ambiguous',
+      candidateEntityIds: expect.arrayContaining([expect.stringContaining('function:sid:')]),
+    }));
   });
 
   it('resolves Construct globals across sheets and respects nested local and function scopes', async () => {

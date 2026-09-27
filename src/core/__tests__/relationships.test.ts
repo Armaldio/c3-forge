@@ -11,6 +11,7 @@ interface RelationshipCase {
   readonly targetKind: EntityKind
   readonly sourceKind: EntityKind
   readonly makeOwner?: () => ForgeEntity
+  readonly makeStructureEntities?: (source: ForgeEntity, targetName: string) => readonly ForgeEntity[]
   readonly makeTarget: (name: string, sid: string) => ForgeEntity
   readonly makeResource: (source: ForgeEntity, targetName: string) => ParsedResource
 }
@@ -29,13 +30,18 @@ const cases: readonly RelationshipCase[] = [
     makeResource: (source, target) => resource('family', source, { members: [target] }),
   },
   {
-    relationship: 'layout-instance',
+    relationship: 'layout-instance-type',
     sourceKind: 'layout',
     targetKind: 'object',
     makeTarget: (name, sid) => createForgeEntity('object', name, `objectTypes/${sid}.json`, { sid }),
     makeResource: (source, target) => resource('layout', source, {
       layers: [{ instances: [{ type: target }] }],
     }),
+    makeStructureEntities: (source, target) => [createForgeEntity('layoutInstance', target, source.sourcePath, {
+      ownerEntityId: source.id,
+      objectType: target,
+      jsonPath: '$.layers[0].instances[0]',
+    }, '$.layers[0].instances[0]')],
   },
   {
     relationship: 'layout-event-sheet',
@@ -104,9 +110,16 @@ const cases: readonly RelationshipCase[] = [
   },
 ]
 
+const structuralRelationships: readonly RelationshipKind[] = [
+  'layout-layer', 'layer-child', 'layer-instance', 'event-sheet-event', 'event-child',
+  'event-defines-function', 'behavior-attachment', 'object-animation', 'animation-frame',
+  'frame-image', 'folder-resource', 'folder-child',
+]
+
 describe('supported relationship coverage', () => {
-  it('has focused resolution tests for every supported relationship kind', () => {
-    expect(new Set(cases.map(({ relationship }) => relationship))).toEqual(new Set(RELATIONSHIP_KINDS))
+  it('accounts for each target-resolved and structurally derived relationship kind', () => {
+    expect(new Set([...cases.map(({ relationship }) => relationship), ...structuralRelationships]))
+      .toEqual(new Set(RELATIONSHIP_KINDS))
   })
 })
 
@@ -114,7 +127,12 @@ function extract(testCase: RelationshipCase, targets: readonly ForgeEntity[]) {
   const source = createForgeEntity(testCase.sourceKind, 'Source', `resources/${testCase.sourceKind}.json`, { sid: 'source' })
   const targetName = targets[0]?.name ?? 'MissingTarget'
   const owner = testCase.makeOwner?.()
-  const index = createProjectIndex([source, ...targets, ...(owner ? [owner] : [])])
+  const index = createProjectIndex([
+    source,
+    ...targets,
+    ...(owner ? [owner] : []),
+    ...(testCase.makeStructureEntities?.(source, targetName) ?? []),
+  ])
   const result = extractProjectRelationships(
     [testCase.makeResource(source, targetName)],
     index,
@@ -136,7 +154,9 @@ describe.each(cases)('$relationship', (testCase) => {
     const matches = result.references.filter((reference) => reference.relationship === testCase.relationship)
     expect(matches).toHaveLength(1)
     expect(matches[0]).toMatchObject({
-      sourceEntityId: result.source.id,
+      ...(testCase.relationship === 'layout-instance-type'
+        ? { sourceEntityId: expect.stringContaining('layoutInstance:') }
+        : { sourceEntityId: result.source.id }),
       targetEntityId: target.id,
       relationship: testCase.relationship,
     })

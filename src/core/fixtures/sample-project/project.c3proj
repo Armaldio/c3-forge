@@ -3,7 +3,9 @@
   "savedWithRelease": "Construct 3 r999",
   "objectTypes": {
     "items": ["Player", "Missing"],
-    "subfolders": [{ "name": "World", "items": ["Enemy"], "subfolders": [] }]
+    "subfolders": [{ "name": "World", "items": ["Enemy"], "subfolders": [
+      { "name": "Caves", "items": [], "subfolders": [] }
+    ] }]
   },
   "families": { "items": ["Actors"], "subfolders": [] },
   "layouts": { "items": ["Main", "Title Screen"], "subfolders": [] },

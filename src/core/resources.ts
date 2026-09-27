@@ -191,6 +191,139 @@ function objectInstanceVariableEntities(resource: ParsedResource): ForgeEntity[]
   return entities;
 }
 
+function structureEntities(resource: ParsedResource): ForgeEntity[] {
+  if (!isRecord(resource.raw)) return [];
+  const entities: ForgeEntity[] = [];
+  const sourcePath = resource.entity.sourcePath;
+  const parentMetadata = { ownerEntityId: resource.entity.id, ownerName: resource.entity.name };
+
+  if (resource.descriptor.kind === 'layout') {
+    const visitLayer = (layer: unknown, jsonPath: string, depth: number): void => {
+      if (!isRecord(layer) || depth > 48) return;
+      const sid = sidOf(layer);
+      const name = stringProperty(layer, 'name') ?? `Layer ${jsonPath.split('[').at(-1)?.replace(']', '') ?? ''}`;
+      const entity = createForgeEntity('layoutLayer', name, sourcePath, {
+        ...parentMetadata,
+        ...(sid ? { sid } : {}),
+        jsonPath,
+        layerPath: jsonPath,
+      }, jsonPath);
+      entities.push(entity);
+
+      if (Array.isArray(layer.instances)) {
+        layer.instances.forEach((instance, index) => {
+          if (!isRecord(instance)) return;
+          const type = stringProperty(instance, 'type');
+          if (!type) return;
+          const instancePath = `${jsonPath}.instances[${index}]`;
+          const instanceSid = sidOf(instance);
+          const uid = typeof instance.uid === 'string' || typeof instance.uid === 'number' ? String(instance.uid) : undefined;
+          entities.push(createForgeEntity('layoutInstance', `${type}${uid ? ` (${uid})` : ''}`, sourcePath, {
+            ...parentMetadata,
+            layerEntityId: entity.id,
+            objectType: type,
+            ...(instanceSid ? { sid: instanceSid } : {}),
+            ...(uid ? { uid } : {}),
+            jsonPath: instancePath,
+            ...(isRecord(instance.world) ? {
+              position: {
+                ...(typeof instance.world.x === 'number' ? { x: instance.world.x } : {}),
+                ...(typeof instance.world.y === 'number' ? { y: instance.world.y } : {}),
+                ...(typeof instance.world.width === 'number' ? { width: instance.world.width } : {}),
+                ...(typeof instance.world.height === 'number' ? { height: instance.world.height } : {}),
+                ...(typeof instance.world.angle === 'number' ? { angle: instance.world.angle } : {}),
+              },
+            } : {}),
+          }, instancePath));
+        });
+      }
+      for (const key of ['subLayers', 'layers']) {
+        if (!Array.isArray(layer[key])) continue;
+        (layer[key] as unknown[]).forEach((child, index) => visitLayer(child, `${jsonPath}.${key}[${index}]`, depth + 1));
+      }
+    };
+    if (Array.isArray(resource.raw.layers)) {
+      resource.raw.layers.forEach((layer, index) => visitLayer(layer, `$.layers[${index}]`, 0));
+    }
+  }
+
+  if (resource.descriptor.kind === 'eventSheet' && Array.isArray(resource.raw.events)) {
+    const visitEvent = (node: unknown, path: string, depth: number, parentId?: string): void => {
+      if (!isRecord(node) || depth > 64) return;
+      const eventType = stringProperty(node, 'eventType')
+        ?? (Array.isArray(node.conditions) || Array.isArray(node.actions) ? 'block' : undefined);
+      if (!eventType) return;
+      const sid = sidOf(node);
+      const name = stringProperty(node, 'functionName', 'title', 'name') ?? eventType;
+      const eventPath = createForgeEntity('event', name, sourcePath, {
+        ...parentMetadata,
+        ...(sid ? { sid } : {}),
+        eventType,
+        jsonPath: path,
+        ...(parentId ? { parentEventId: parentId } : {}),
+      }, path);
+      entities.push(eventPath);
+      if (Array.isArray(node.children)) {
+        node.children.forEach((child, index) => visitEvent(child, `${path}.children[${index}]`, depth + 1, eventPath.id));
+      }
+    };
+    resource.raw.events.forEach((event, index) => visitEvent(event, `$.events[${index}]`, 0));
+  }
+
+  if (resource.descriptor.kind === 'object') {
+    if (Array.isArray(resource.raw.behaviorTypes)) {
+      resource.raw.behaviorTypes.forEach((behavior, index) => {
+        if (!isRecord(behavior)) return;
+        const behaviorId = stringProperty(behavior, 'behaviorId');
+        const name = stringProperty(behavior, 'name');
+        if (!behaviorId || !name) return;
+        const sid = sidOf(behavior);
+        entities.push(createForgeEntity('behavior', name, sourcePath, {
+          ...parentMetadata,
+          ...(sid ? { sid } : {}),
+          behaviorId,
+          jsonPath: `$.behaviorTypes[${index}]`,
+        }, `behaviorTypes.${sid ?? index}`));
+      });
+    }
+    if (resource.raw['plugin-id'] === 'Sprite' && isRecord(resource.raw.animations) && Array.isArray(resource.raw.animations.items)) {
+      resource.raw.animations.items.forEach((animation, animationIndex) => {
+        if (!isRecord(animation)) return;
+        const animationName = stringProperty(animation, 'name');
+        if (!animationName) return;
+        const animationSid = sidOf(animation);
+        const animationPath = `$.animations.items[${animationIndex}]`;
+        const animationEntity = createForgeEntity('animation', animationName, sourcePath, {
+          ...parentMetadata,
+          ...(animationSid ? { sid: animationSid } : {}),
+          animationName,
+          jsonPath: animationPath,
+        }, animationPath);
+        entities.push(animationEntity);
+        if (!Array.isArray(animation.frames)) return;
+        animation.frames.forEach((frame, frameIndex) => {
+          if (!isRecord(frame)) return;
+          const framePath = `${animationPath}.frames[${frameIndex}]`;
+          const frameSid = sidOf(frame);
+          entities.push(createForgeEntity('animationFrame', `${animationName} · ${frameIndex + 1}`, sourcePath, {
+            ...parentMetadata,
+            animationEntityId: animationEntity.id,
+            animationName,
+            frameIndex,
+            ...(frameSid ? { sid: frameSid } : {}),
+            ...(typeof frame.imageSpriteId === 'number' || typeof frame.imageSpriteId === 'string'
+              ? { imageSpriteId: String(frame.imageSpriteId) } : {}),
+            ...(typeof frame.fileType === 'string' ? { fileType: frame.fileType } : {}),
+            jsonPath: framePath,
+          }, framePath));
+        });
+      });
+    }
+  }
+
+  return entities;
+}
+
 async function readOne(
   filesystem: ProjectFileSystem,
   manifest: ProjectManifest,
@@ -258,6 +391,7 @@ export async function loadManifestResources(
   for (const resource of resources) {
     entities.push(...eventSemanticEntities(resource));
     entities.push(...objectInstanceVariableEntities(resource));
+    entities.push(...structureEntities(resource));
   }
 
   const plugins = new Map<string, ForgeEntity>();

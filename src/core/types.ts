@@ -13,6 +13,13 @@ export type EntityKind =
   | 'variable'
   | 'addon'
   | 'asset'
+  | 'layoutLayer'
+  | 'layoutInstance'
+  | 'event'
+  | 'behavior'
+  | 'animation'
+  | 'animationFrame'
+  | 'projectFolder'
   | 'projectFile';
 
 export interface ForgeEntity {
@@ -40,9 +47,21 @@ export interface EntityIdentityConflict {
 
 export const RELATIONSHIP_KINDS = [
   'family-member',
-  'layout-instance',
+  'layout-layer',
+  'layer-child',
+  'layer-instance',
+  'layout-instance-type',
   'layout-event-sheet',
+  'event-sheet-event',
+  'event-child',
+  'event-defines-function',
   'event-sheet-include',
+  'behavior-attachment',
+  'object-animation',
+  'animation-frame',
+  'frame-image',
+  'folder-resource',
+  'folder-child',
   'object-reference',
   'function-call',
   'event-variable-reference',
@@ -124,6 +143,11 @@ export interface ManifestResource {
   readonly metadata: Readonly<Record<string, JsonValue>>;
 }
 
+export interface ManifestFolder {
+  readonly kind: EntityKind;
+  readonly path: string;
+}
+
 export interface ManifestAddon {
   readonly id: string;
   readonly name: string;
@@ -137,6 +161,7 @@ export interface ProjectManifest {
   readonly name: string;
   readonly constructVersion?: string;
   readonly resources: readonly ManifestResource[];
+  readonly folders: readonly ManifestFolder[];
   readonly addons: readonly ManifestAddon[];
   readonly metadata: Readonly<Record<string, JsonValue>>;
 }
