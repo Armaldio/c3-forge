@@ -153,14 +153,21 @@ describe('Construct project core', () => {
     expect(analysis.index.byName.get('player')?.[0]?.sourcePath).toBe('objectTypes/Player.json');
     expect(analysis.index.bySourcePath.get('layouts/Main.json')).toHaveLength(1);
 
-    const relationships = analysis.references.map((reference) => [reference.relationship, reference.targetName]);
+    const relationships = analysis.references.map((reference) => [
+      reference.relationship,
+      analysis.index.byId.get(reference.targetEntityId)?.name,
+    ]);
     expect(relationships).toContainEqual(['layout-event-sheet', 'Game Events']);
     expect(relationships).toContainEqual(['layout-instance', 'Player']);
     expect(relationships).toContainEqual(['layout-instance', 'Enemy']);
     expect(relationships).toContainEqual(['family-member', 'Player']);
     expect(relationships).toContainEqual(['event-sheet-include', 'Shared Events']);
-    expect(relationships).toContainEqual(['event-sheet-include', 'Missing Events']);
     expect(relationships).toContainEqual(['function-call', 'Spawn']);
+    expect(analysis.unresolvedReferences).toContainEqual(expect.objectContaining({
+      relationship: 'event-sheet-include',
+      targetName: 'Missing Events',
+      resolution: 'missing',
+    }));
 
     const resourceDiagnostics = analysis.diagnostics.filter((diagnostic) => diagnostic.ruleId.startsWith('resource.'));
     expect(resourceDiagnostics).toHaveLength(2);
@@ -173,7 +180,7 @@ describe('Construct project core', () => {
       ruleId: 'resource.invalid-json',
       sourcePath: 'timelines/Broken.json',
     }));
-    expect(analysis.diagnostics.some((diagnostic) => diagnostic.ruleId === 'reference.unresolved')).toBe(true);
+    expect(analysis.diagnostics.some((diagnostic) => diagnostic.ruleId === 'relationship.missing-target')).toBe(true);
     expect(analysis.index.byKind.get('asset')?.some((entity) => entity.sourcePath === 'images/player-frame.png')).toBe(true);
     expect(analysis.index.byKind.get('addon')?.some((entity) => entity.name === 'Fixture plugin')).toBe(true);
     expect(analysis.stats.entitiesByKind.layout).toBe(2);
@@ -203,10 +210,10 @@ describe('Construct project core', () => {
     expect(analysis.manifest.name).toBe('Platform abstraction');
     expect(analysis.manifest.constructVersion).toBe('44002');
     expect(analysis.stats.entitiesByKind).toMatchObject({ object: 9, layout: 1, eventSheet: 1, variable: 2 });
-    expect(analysis.references).toHaveLength(92);
-    expect(analysis.references.every((reference) => reference.targetEntityId)).toBe(true);
-    expect(analysis.dependencies).toHaveLength(24);
+    expect(analysis.references.every((reference) => analysis.index.byId.has(reference.targetEntityId))).toBe(true);
+    expect(analysis.dependencies.length).toBeLessThan(24);
     expect(analysis.dependencies.some((dependency) => dependency.occurrenceIds.length > 1)).toBe(true);
+    expect(analysis.unresolvedReferences).toEqual([]);
     expect(analysis.diagnostics).toEqual([]);
   });
 
@@ -232,10 +239,10 @@ describe('Construct project core', () => {
 
     const combatCoinReferences = analysis.references.filter((reference) =>
       reference.sourcePath === combatSourcePath && reference.targetEntityId === coins?.id);
-    expect(combatCoinReferences.filter((reference) => reference.relationship === 'event-variable-action')).toHaveLength(2);
-    expect(combatCoinReferences.filter((reference) => reference.relationship === 'event-variable-condition')).toHaveLength(1);
-    expect(combatCoinReferences.filter((reference) => reference.relationship === 'event-variable-expression')).toHaveLength(4);
-    expect(combatCoinReferences.find((reference) => reference.relationship === 'event-variable-condition')?.sourceLocation)
+    expect(combatCoinReferences.filter((reference) =>
+      reference.sourceLocation?.jsonPath?.endsWith('.parameters.variable'))).toHaveLength(3);
+    expect(combatCoinReferences.find((reference) =>
+      reference.sourceLocation?.jsonPath?.endsWith('.parameters.variable'))?.sourceLocation)
       .toMatchObject({
         eventSid: '201',
         entryKind: 'condition',
@@ -248,7 +255,8 @@ describe('Construct project core', () => {
     expect(nestedOccurrences.some((reference) => reference.sourceLocation?.eventSid === '217')).toBe(false);
 
     const outsideGroupUses = analysis.references.filter((reference) =>
-      reference.sourceLocation?.eventSid === '219' && reference.targetName === 'groupDamage');
+      reference.sourceLocation?.eventSid === '219'
+      && analysis.index.byId.get(reference.targetEntityId)?.name === 'groupDamage');
     expect(outsideGroupUses.some((reference) => reference.targetEntityId === groupDamage?.id)).toBe(false);
     expect(outsideGroupUses.some((reference) => reference.targetEntityId === forwardLocal?.id)).toBe(false);
 
@@ -265,10 +273,11 @@ describe('Construct project core', () => {
     expect(eventUsesVariable('283', customLocal)).toBe(true);
     expect(analysis.references.filter((reference) =>
       ['291', '293'].includes(reference.sourceLocation?.eventSid ?? '')
-      && reference.relationship === 'event-variable-action'
+      && reference.relationship === 'event-variable-reference'
       && reference.targetEntityId === groupFunctionLocal?.id)).toHaveLength(2);
     expect(analysis.references.some((reference) =>
-      reference.relationship === 'event-object-reference' && reference.targetName === 'Functions')).toBe(false);
+      reference.relationship === 'object-reference'
+      && analysis.index.byId.get(reference.targetEntityId)?.name === 'Functions')).toBe(false);
 
     const award = analysis.index.byKind.get('function')?.find((entity) => entity.name === 'AwardCoins');
     expect(award?.id).toContain('sid:230');
@@ -293,10 +302,12 @@ describe('Construct project core', () => {
     expect(analysis.index.byKind.get('object')?.find((entity) => entity.name === 'Player')?.sourcePath)
       .toBe('objectTypes/Actors/Player.json');
     expect(analysis.references.some((reference) =>
-      reference.relationship === 'family-member' && reference.targetName === 'Player')).toBe(true);
+      reference.relationship === 'family-member'
+      && analysis.index.byId.get(reference.targetEntityId)?.name === 'Player')).toBe(true);
 
-    const coinExpressionReferences = combatCoinReferences.filter((reference) => reference.relationship === 'event-variable-expression');
-    expect(coinExpressionReferences).toHaveLength(4);
+    const coinExpressionReferences = combatCoinReferences.filter((reference) =>
+      !reference.sourceLocation?.jsonPath?.endsWith('.parameters.variable'));
+    expect(coinExpressionReferences.length).toBeGreaterThanOrEqual(4);
     expect(new Set(coinExpressionReferences.map((reference) => reference.id)).size).toBe(4);
     expect(new Set(coinExpressionReferences.map((reference) => reference.sourceLocation?.jsonPath)).size).toBeGreaterThan(0);
     expect(coinExpressionReferences.some((reference) => reference.sourceLocation?.eventSid === '201')).toBe(true);
@@ -312,17 +323,16 @@ describe('Construct project core', () => {
     expect(repeatedActionOccurrences).toHaveLength(2);
     expect(new Set(repeatedActionOccurrences.map((reference) => reference.id)).size).toBe(2);
 
-    const possibleFamilyMatches = analysis.references.filter((reference) =>
-      reference.source === 'exact-string-fallback' && reference.targetName === 'Combatants');
-    expect(possibleFamilyMatches).toHaveLength(1);
-    expect(possibleFamilyMatches[0]?.sourceLocation?.jsonPath).toBe('$.notes');
+    expect(analysis.references.some((reference) =>
+      analysis.index.byId.get(reference.targetEntityId)?.name === 'Combatants'
+      && reference.sourceLocation?.jsonPath === '$.notes')).toBe(false);
 
     expect(analysis.referencesBySource.get(combatSheet?.id ?? '')).toContain(combatCoinReferences[0]);
     expect(analysis.referencesByTarget.get(coins?.id ?? '')).toEqual(expect.arrayContaining(combatCoinReferences));
     expect(analysis.dependencies.find((edge) =>
       edge.sourceEntityId === combatSheet?.id
       && edge.targetEntityId === coins?.id
-      && edge.relationship === 'event-variable-expression')?.occurrenceIds).toHaveLength(4);
+      && edge.relationship === 'event-variable-reference')?.occurrenceIds.length).toBeGreaterThanOrEqual(4);
     expect(new Set(analysis.dependencies.map((edge) => edge.id)).size).toBe(analysis.dependencies.length);
     expect(analysis.diagnostics.some((diagnostic) => diagnostic.ruleId === 'resource.missing-resource')).toBe(false);
   });

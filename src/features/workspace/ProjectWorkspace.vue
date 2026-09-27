@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import type { ForgeEntity, ProjectAnalysis, ProjectLoadStage } from '../../core/types'
 import EntityExplorer from './EntityExplorer.vue'
-import EntityInspector from './EntityInspector.vue'
+import EntityView from './EntityView.vue'
 import GlobalSearch from './GlobalSearch.vue'
 import ProjectDiagnostics from './ProjectDiagnostics.vue'
 import ProjectOverview from './ProjectOverview.vue'
+import RelationshipGraph from './RelationshipGraph.vue'
 import { loadStageLabel, summarizeProjectDiagnostics } from './presentation'
 
 const props = defineProps<{
@@ -32,11 +33,16 @@ const archiveInput = ref<HTMLInputElement | null>(null)
 const projectMenu = ref<HTMLDetailsElement | null>(null)
 const diagnosticsToggle = ref<HTMLButtonElement | null>(null)
 const diagnosticsOpen = ref(false)
+const activeWorkspaceView = ref<'overview' | 'graph'>('overview')
 const diagnosticSummary = computed(() => summarizeProjectDiagnostics(props.analysis?.diagnostics ?? []))
 const diagnosticMark = computed(() => {
   if (diagnosticSummary.value.state === 'clear') return '✓'
   if (diagnosticSummary.value.state === 'info') return 'i'
   return '!'
+})
+
+watch(() => props.selectedEntityId, (selectedId) => {
+  if (selectedId) activeWorkspaceView.value = 'overview'
 })
 
 function closeProjectMenu(): void {
@@ -60,6 +66,16 @@ function toggleDiagnostics(): void {
 function closeDiagnostics(): void {
   diagnosticsOpen.value = false
   void nextTick(() => diagnosticsToggle.value?.focus())
+}
+
+function openGraphEntity(entityId: string): void {
+  activeWorkspaceView.value = 'overview'
+  emit('select-entity', entityId)
+}
+
+function selectSearchResult(entityId: string): void {
+  emit('select-entity', entityId)
+  emit('update:searchQuery', '')
 }
 
 function handleArchiveSelection(event: Event): void {
@@ -139,7 +155,7 @@ function handleArchiveSelection(event: Event): void {
           :query="searchQuery"
           :results="searchResults"
           @update:query="emit('update:searchQuery', $event)"
-          @select="emit('select-entity', $event)"
+          @select="selectSearchResult"
         />
         <details
           ref="projectMenu"
@@ -218,12 +234,63 @@ function handleArchiveSelection(event: Event): void {
             @select="emit('select-entity', $event)"
           />
           <div class="main-column">
-            <ProjectOverview :analysis="analysis" />
-            <EntityInspector
-              :analysis="analysis"
-              :selected-entity-id="selectedEntityId"
-              @select="emit('select-entity', $event)"
-            />
+            <nav
+              class="workspace-view-tabs"
+              role="tablist"
+              aria-label="Project views"
+            >
+              <button
+                id="workspace-tab-overview"
+                type="button"
+                role="tab"
+                :aria-selected="activeWorkspaceView === 'overview'"
+                aria-controls="workspace-panel-overview"
+                @click="activeWorkspaceView = 'overview'"
+              >
+                Overview
+              </button>
+              <button
+                id="workspace-tab-graph"
+                type="button"
+                role="tab"
+                :aria-selected="activeWorkspaceView === 'graph'"
+                aria-controls="workspace-panel-graph"
+                @click="activeWorkspaceView = 'graph'"
+              >
+                Graph
+              </button>
+            </nav>
+            <section
+              v-show="activeWorkspaceView === 'overview'"
+              id="workspace-panel-overview"
+              class="workspace-view-panel"
+              role="tabpanel"
+              aria-labelledby="workspace-tab-overview"
+            >
+              <ProjectOverview
+                v-if="!selectedEntityId"
+                :analysis="analysis"
+              />
+              <EntityView
+                v-else
+                :analysis="analysis"
+                :selected-entity-id="selectedEntityId"
+                @select="emit('select-entity', $event)"
+              />
+            </section>
+            <section
+              v-show="activeWorkspaceView === 'graph'"
+              id="workspace-panel-graph"
+              class="workspace-view-panel"
+              role="tabpanel"
+              aria-labelledby="workspace-tab-graph"
+            >
+              <RelationshipGraph
+                :analysis="analysis"
+                :selected-entity-id="selectedEntityId"
+                @open-entity="openGraphEntity"
+              />
+            </section>
           </div>
         </section>
 

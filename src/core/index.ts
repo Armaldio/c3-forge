@@ -5,6 +5,7 @@ export type { ManifestParseResult } from './manifest';
 export { createProjectIndex } from './project-index';
 export { createForgeEntity, entityFromResource, makeStableEntityId } from './entities';
 export { normalizeProjectPath, joinProjectPaths, resolveProjectPath, projectPathBasename, projectPathDirname } from './paths';
+export { RELATIONSHIP_KINDS } from './types';
 export type { ProjectFileSystem } from './filesystem';
 export type {
   AnalysisStats,
@@ -25,9 +26,9 @@ export type {
   ProjectManifest,
   ProjectReference,
   ReferenceSourceLocation,
-  ReferenceConfidence,
-  ReferenceSource,
+  RelationshipKind,
   ResourceIssue,
   ResourceStage,
+  UnresolvedProjectReference,
 } from './types';
 export type { ParsedEntitySearch } from './search';

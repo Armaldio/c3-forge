@@ -3,7 +3,7 @@ import { createAnalysisStats, createProjectDiagnostics } from './diagnostics';
 import { entityForProjectFile } from './entities';
 import { parseProjectManifestResult, type ManifestParseResult } from './manifest';
 import { createProjectIndex } from './project-index';
-import { createProjectDependencies, createReferenceIndexes, extractProjectReferences } from './references';
+import { createProjectDependencies, createReferenceIndexes, extractProjectRelationships } from './references';
 import { loadManifestResources } from './resources';
 import type { ProjectAnalysis, ProjectLoadOptions, ProjectLoadStage, ResourceIssue } from './types';
 
@@ -57,13 +57,21 @@ export async function loadProject(filesystem: ProjectFileSystem, options?: Proje
   const index = createProjectIndex(entities);
 
   report(options, 'references');
-  const references = extractProjectReferences(loaded.resources, index);
+  const relationshipResult = extractProjectRelationships(loaded.resources, index);
+  const references = relationshipResult.references;
   const referenceIndexes = createReferenceIndexes(references);
   const dependencies = createProjectDependencies(references);
 
   report(options, 'diagnostics');
-  const diagnostics = createProjectDiagnostics(index, references, allIssues);
-  const stats = createAnalysisStats(index.entities, references, diagnostics);
+  const diagnostics = createProjectDiagnostics(index, relationshipResult.unresolvedReferences, allIssues);
+  const stats = createAnalysisStats(
+    index.entities,
+    references,
+    dependencies,
+    relationshipResult.unresolvedReferences,
+    relationshipResult.unsupportedExpressionCount,
+    diagnostics,
+  );
 
   report(options, 'ready');
   return {
@@ -72,6 +80,8 @@ export async function loadProject(filesystem: ProjectFileSystem, options?: Proje
     references,
     ...referenceIndexes,
     dependencies,
+    unresolvedReferences: relationshipResult.unresolvedReferences,
+    unsupportedExpressionCount: relationshipResult.unsupportedExpressionCount,
     diagnostics,
     stats,
   };

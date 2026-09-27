@@ -4,14 +4,16 @@ import type {
   EntityKind,
   ForgeEntity,
   ProjectDiagnostic,
+  ProjectDependency,
   ProjectIndex,
   ProjectReference,
   ResourceIssue,
+  UnresolvedProjectReference,
 } from './types';
 
 export function createProjectDiagnostics(
   index: ProjectIndex,
-  references: readonly ProjectReference[],
+  unresolvedReferences: readonly UnresolvedProjectReference[],
   issues: readonly ResourceIssue[],
 ): readonly ProjectDiagnostic[] {
   const diagnostics: ProjectDiagnostic[] = issues.map((issue) => ({
@@ -23,55 +25,24 @@ export function createProjectDiagnostics(
     evidence: `${issue.stage}: ${issue.path || 'project root'}`,
   }));
 
-  for (const reference of references) {
-    if (reference.source !== 'semantic' || reference.targetEntityId) continue;
-    const candidates = (index.byName.get(reference.targetName.toLocaleLowerCase('en-US')) ?? [])
-      .filter((entity) => entity.name === reference.targetName
-        && (!reference.targetKind || entity.kind === reference.targetKind));
-    if (candidates.length > 1) {
-      diagnostics.push({
-        ruleId: 'reference.ambiguous',
-        severity: 'warning',
-        title: 'Known reference target is ambiguous',
-        description: `${reference.relationship} refers to “${reference.targetName}”, which matches ${candidates.length} indexed entities.`,
-        ...(reference.sourceEntityId ? { entityId: reference.sourceEntityId } : {}),
-        sourcePath: reference.sourcePath,
-        evidence: candidates.map((entity) => `${entity.kind}: ${entity.sourcePath}`).join('; '),
-      });
-      continue;
-    }
-    diagnostics.push({
-      ruleId: 'reference.unresolved',
-      severity: 'warning',
-      title: 'Known reference target was not found',
-      description: `${reference.relationship} refers to “${reference.targetName}”, but no matching indexed entity was found.`,
-      ...(reference.sourceEntityId ? { entityId: reference.sourceEntityId } : {}),
-      sourcePath: reference.sourcePath,
-      evidence: `${reference.relationship}: ${reference.targetName}`,
+  for (const reference of unresolvedReferences) {
+    const ambiguous = reference.resolution === 'ambiguous';
+    const candidates = reference.candidateEntityIds.flatMap((id) => {
+      const candidate = index.byId.get(id);
+      return candidate ? [`${candidate.kind}: ${candidate.sourcePath}`] : [];
     });
-  }
-
-  const nameGroups = new Map<string, ForgeEntity[]>();
-  for (const entity of index.entities) {
-    if (!['object', 'family', 'layout', 'eventSheet', 'function'].includes(entity.kind)) continue;
-    const key = `${entity.kind}:${entity.name.toLocaleLowerCase('en-US')}`;
-    const group = nameGroups.get(key) ?? [];
-    group.push(entity);
-    nameGroups.set(key, group);
-  }
-  for (const group of nameGroups.values()) {
-    if (group.length < 2) continue;
-    for (const entity of group) {
-      diagnostics.push({
-        ruleId: 'entity.ambiguous-name',
-        severity: 'warning',
-        title: 'Entity name is ambiguous',
-        description: `${group.length} ${entity.kind} entities are named “${entity.name}”; name-based references may be ambiguous.`,
-        entityId: entity.id,
-        sourcePath: entity.sourcePath,
-        evidence: group.map((item) => item.sourcePath).join(', '),
-      });
-    }
+    diagnostics.push({
+      ruleId: ambiguous ? 'relationship.ambiguous-target' : 'relationship.missing-target',
+      severity: 'warning',
+      title: ambiguous ? 'Relationship target is ambiguous' : 'Relationship target is missing',
+      description: ambiguous
+        ? `${reference.relationship} refers to “${reference.targetName}”, which matches multiple indexed entities.`
+        : `${reference.relationship} refers to “${reference.targetName}”, but no matching indexed entity was found.`,
+      entityId: reference.sourceEntityId,
+      sourcePath: reference.sourcePath,
+      sourceLocation: reference.sourceLocation,
+      evidence: ambiguous ? candidates.join('; ') : `${reference.relationship}: ${reference.targetName}`,
+    });
   }
 
   for (const conflict of index.identityConflicts) {
@@ -94,6 +65,9 @@ export function createProjectDiagnostics(
 export function createAnalysisStats(
   entities: readonly ForgeEntity[],
   references: readonly ProjectReference[],
+  dependencies: readonly ProjectDependency[],
+  unresolvedReferences: readonly UnresolvedProjectReference[],
+  unsupportedExpressionCount: number,
   diagnostics: readonly ProjectDiagnostic[],
 ): AnalysisStats {
   const entitiesByKind = {
@@ -118,6 +92,9 @@ export function createAnalysisStats(
     totalEntities: entities.length,
     entitiesByKind,
     totalReferences: references.length,
+    totalDependencies: dependencies.length,
+    totalUnresolvedReferences: unresolvedReferences.length,
+    unsupportedExpressionCount,
     diagnosticsBySeverity,
   };
 }

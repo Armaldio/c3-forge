@@ -15,7 +15,9 @@ const facts = computed(() => {
     { label: 'Event sheets', value: count('eventSheet') },
     { label: 'Objects', value: count('object') },
     { label: 'Families', value: count('family') },
-    { label: 'References', value: props.analysis.stats.totalReferences },
+    { label: 'Relationship occurrences', value: props.analysis.stats.totalReferences },
+    { label: 'Dependency edges', value: props.analysis.stats.totalDependencies },
+    { label: 'Unresolved explicit targets', value: props.analysis.stats.totalUnresolvedReferences },
   ]
 })
 </script>

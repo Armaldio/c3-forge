@@ -1,12 +1,12 @@
 # C3 Forge
 
-C3 Forge is a local-first, read-only analyzer for Construct 3 projects. It reads folder projects or `.c3p` archives in the browser, builds a semantic index of the resources it understands, and shows entity relationships and conservative diagnostics. Project files stay on the selected device and Forge has no write operations.
+C3 Forge is a local-first, read-only analyzer for Construct 3 projects. It reads folder projects or `.c3p` archives in the browser, indexes the resources it understands, and shows resolved relationships, project architecture, and diagnostics. Project files stay on the selected device and Forge has no write operations.
 
 ## V0 scope
 
-Forge reads `project.c3proj` and manifest-listed object types, families, layouts, event sheets, timelines, flowcharts, and project files. It also indexes available add-on metadata and files under `images/`. The workspace includes a project overview, domain-organized explorer, global search, entity details with incoming and outgoing references, and resource or semantic diagnostics.
+Forge reads `project.c3proj` and manifest-listed object types, families, layouts, event sheets, timelines, flowcharts, and project files. It also indexes available add-on metadata and files under `images/`. The workspace includes a project overview, domain-organized explorer, global search, a “Where is this used?” entity view, a relationship graph, and diagnostics.
 
-Construct's serialized project format can change between releases and is not a fixed public schema ([format guide](https://www.construct.net/en/tutorials/constructs-project-format-3275)). Forge normalizes the fields it understands, ignores unknown properties safely, and reports malformed or missing resources without dropping the rest of the project. Explicit structural references and recognized System variable actions are marked semantic. Declared variables found in Construct expression parameters are medium-confidence expression references; exact-string matches remain low-confidence fallbacks.
+Forge only reports relationships it can resolve from supported Construct project structures and expressions. A relationship exists only when a supported serialized field or parsed expression identifies exactly one indexed target. An explicit target that is missing or ambiguous appears in Diagnostics and never becomes a graph edge. Unrecognized data and unsupported expression syntax are ignored; arbitrary text and entity-name matches do not contribute to relationship counts, “Used in” results, or the graph. Construct's serialized project format can change between releases and is not a fixed public schema ([format guide](https://www.construct.net/en/tutorials/constructs-project-format-3275)), so Forge adds support incrementally and keeps unknown properties safe.
 
 V0 intentionally does not write to projects or implement refactoring, rollback, snapshots, Git, cloud sync, AI, authentication, reusable modules, or backend services.
 

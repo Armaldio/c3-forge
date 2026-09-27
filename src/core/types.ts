@@ -38,8 +38,19 @@ export interface EntityIdentityConflict {
   readonly entities: readonly ForgeEntity[];
 }
 
-export type ReferenceConfidence = 'high' | 'medium' | 'low';
-export type ReferenceSource = 'semantic' | 'construct-expression' | 'exact-string-fallback';
+export const RELATIONSHIP_KINDS = [
+  'family-member',
+  'layout-instance',
+  'layout-event-sheet',
+  'event-sheet-include',
+  'object-reference',
+  'function-call',
+  'event-variable-reference',
+  'instance-variable-reference',
+  'family-variable-reference',
+] as const;
+
+export type RelationshipKind = typeof RELATIONSHIP_KINDS[number];
 
 export interface ReferenceSourceLocation {
   readonly eventSid?: string;
@@ -55,28 +66,31 @@ export interface ReferenceSourceLocation {
 
 export interface ProjectReference {
   readonly id: string;
-  readonly sourceEntityId?: string;
+  readonly sourceEntityId: string;
+  readonly targetEntityId: string;
+  readonly relationship: RelationshipKind;
   readonly sourcePath: string;
-  readonly targetEntityId?: string;
+  readonly sourceLocation?: ReferenceSourceLocation;
+}
+
+/** An explicit Construct reference that could not be resolved to one target. */
+export interface UnresolvedProjectReference {
+  readonly id: string;
+  readonly sourceEntityId: string;
+  readonly sourcePath: string;
   readonly targetName: string;
-  readonly targetKind?: EntityKind;
-  readonly relationship: string;
-  readonly confidence: ReferenceConfidence;
-  readonly source: ReferenceSource;
+  readonly relationship: RelationshipKind;
+  readonly resolution: 'missing' | 'ambiguous';
+  readonly candidateEntityIds: readonly string[];
   readonly sourceLocation?: ReferenceSourceLocation;
 }
 
 /** A derived graph edge that points back to all of its source occurrences. */
 export interface ProjectDependency {
   readonly id: string;
-  readonly sourceEntityId?: string;
-  readonly sourcePath: string;
-  readonly targetEntityId?: string;
-  readonly targetName: string;
-  readonly targetKind?: EntityKind;
-  readonly relationship: string;
-  readonly confidence: ReferenceConfidence;
-  readonly source: ReferenceSource;
+  readonly sourceEntityId: string;
+  readonly relationship: RelationshipKind;
+  readonly targetEntityId: string;
   readonly occurrenceIds: readonly string[];
 }
 
@@ -89,6 +103,7 @@ export interface ProjectDiagnostic {
   readonly description: string;
   readonly entityId?: string;
   readonly sourcePath?: string;
+  readonly sourceLocation?: ReferenceSourceLocation;
   readonly evidence?: string;
   readonly futureFixId?: string;
 }
@@ -130,6 +145,9 @@ export interface AnalysisStats {
   readonly totalEntities: number;
   readonly entitiesByKind: Readonly<Record<EntityKind, number>>;
   readonly totalReferences: number;
+  readonly totalDependencies: number;
+  readonly totalUnresolvedReferences: number;
+  readonly unsupportedExpressionCount: number;
   readonly diagnosticsBySeverity: Readonly<Record<DiagnosticSeverity, number>>;
 }
 
@@ -140,6 +158,8 @@ export interface ProjectAnalysis {
   readonly referencesBySource: ReadonlyMap<string, readonly ProjectReference[]>;
   readonly referencesByTarget: ReadonlyMap<string, readonly ProjectReference[]>;
   readonly dependencies: readonly ProjectDependency[];
+  readonly unresolvedReferences: readonly UnresolvedProjectReference[];
+  readonly unsupportedExpressionCount: number;
   readonly diagnostics: readonly ProjectDiagnostic[];
   readonly stats: AnalysisStats;
 }

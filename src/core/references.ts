@@ -6,96 +6,105 @@ import type {
   ProjectDependency,
   ProjectIndex,
   ProjectReference,
-  ReferenceConfidence,
-  ReferenceSource,
   ReferenceSourceLocation,
+  RelationshipKind,
+  UnresolvedProjectReference,
 } from './types';
 
 const EVENT_REFERENCE_KINDS: readonly EntityKind[] = ['object', 'family'];
-const FALLBACK_KINDS: readonly EntityKind[] = ['object', 'family', 'layout', 'eventSheet', 'function', 'variable'];
 const NON_OBJECT_CLASSES = new Set(['system', 'function', 'functions']);
 const EVENT_VARIABLE_PARAMETER_ACTIONS = new Set(['set-eventvar-value', 'add-to-eventvar']);
 const EVENT_VARIABLE_PARAMETER_CONDITIONS = new Set(['compare-eventvar']);
 const EXPRESSION_PARAMETER_NAMES = new Set(['count', 'expression', 'first-value', 'second-value', 'text', 'value']);
-
-interface AddReferenceOptions {
-  readonly sourceEntity: ForgeEntity;
-  readonly targetName: string;
-  readonly relationship: string;
-  readonly confidence: ReferenceConfidence;
-  readonly source: ReferenceSource;
-  readonly index: ProjectIndex;
-  readonly sourceLocation: ReferenceSourceLocation;
-  readonly targetKinds?: readonly EntityKind[];
-  readonly resolvedTarget?: ForgeEntity;
-  readonly allowNameLookup?: boolean;
+const MAX_EXPRESSION_LENGTH = 16_384;
+const MAX_EXPRESSION_TOKENS = 512;
+interface RelationshipCollector {
+  readonly references: Map<string, ProjectReference>;
+  readonly unresolvedReferences: Map<string, UnresolvedProjectReference>;
+  unsupportedExpressionCount: number;
 }
 
 interface EventScope {
   readonly eventPath: readonly number[];
-  readonly eventJsonPath: string;
-  readonly eventSid?: string;
   readonly functionEntity?: ForgeEntity;
   readonly functionId?: string;
   readonly functionSid?: string;
 }
+
+type Resolution<T> =
+  | { readonly status: 'resolved'; readonly value: T }
+  | { readonly status: 'missing' }
+  | { readonly status: 'ambiguous'; readonly candidates: readonly T[] };
+
+interface ExpressionReference {
+  readonly kind: 'identifier' | 'member' | 'function';
+  readonly name: string;
+  readonly owner?: string;
+  readonly start: number;
+  readonly end: number;
+}
+
+interface ExpressionToken {
+  readonly kind: 'identifier' | 'number' | 'string' | 'symbol';
+  readonly value: string;
+  readonly start: number;
+  readonly end: number;
+}
+
+type FamilyMemberships = ReadonlyMap<string, readonly ForgeEntity[]>;
 
 function targetCandidates(index: ProjectIndex, name: string, kinds?: readonly EntityKind[]): readonly ForgeEntity[] {
   const all = index.byName.get(name.toLocaleLowerCase('en-US')) ?? [];
   return all.filter((entity) => entity.name === name && (!kinds || kinds.includes(entity.kind)));
 }
 
-function addReference(references: Map<string, ProjectReference>, options: AddReferenceOptions): void {
-  if (options.targetName.trim() === '') return;
+function resolveTarget(index: ProjectIndex, name: string, kinds?: readonly EntityKind[]): Resolution<ForgeEntity> {
+  const candidates = targetCandidates(index, name, kinds);
+  if (candidates.length === 1) return { status: 'resolved', value: candidates[0] as ForgeEntity };
+  if (candidates.length > 1) return { status: 'ambiguous', candidates };
+  return { status: 'missing' };
+}
 
-  const candidates = targetCandidates(options.index, options.targetName, options.targetKinds);
-  const targetEntity = options.resolvedTarget
-    ?? (options.allowNameLookup !== false && candidates.length === 1 ? candidates[0] : undefined);
-  const targetKind = targetEntity?.kind ?? (options.targetKinds?.length === 1 ? options.targetKinds[0] : undefined);
-  const targetIdentity = targetEntity?.id ?? `${targetKind ?? ''}:${options.targetName}`;
-  const occurrence = JSON.stringify(options.sourceLocation);
-  const id = [options.sourceEntity.id, options.relationship, targetIdentity, occurrence]
+function addRelationship(
+  collector: RelationshipCollector,
+  source: ForgeEntity,
+  relationship: RelationshipKind,
+  targetName: string,
+  resolution: Resolution<ForgeEntity>,
+  sourceLocation: ReferenceSourceLocation,
+): void {
+  if (resolution.status === 'resolved') {
+    const target = resolution.value;
+    const id = [source.id, relationship, target.id, JSON.stringify(sourceLocation)]
+      .map((part) => encodeURIComponent(part))
+      .join(':');
+    collector.references.set(id, {
+      id,
+      sourceEntityId: source.id,
+      targetEntityId: target.id,
+      relationship,
+      sourcePath: source.sourcePath,
+      sourceLocation,
+    });
+    return;
+  }
+
+  const candidateEntityIds = resolution.status === 'ambiguous'
+    ? resolution.candidates.map((candidate) => candidate.id)
+    : [];
+  const id = [source.id, relationship, targetName, resolution.status, JSON.stringify(sourceLocation)]
     .map((part) => encodeURIComponent(part))
     .join(':');
-
-  references.set(id, {
+  collector.unresolvedReferences.set(id, {
     id,
-    sourceEntityId: options.sourceEntity.id,
-    sourcePath: options.sourceEntity.sourcePath,
-    ...(targetEntity ? { targetEntityId: targetEntity.id } : {}),
-    targetName: options.targetName,
-    ...(targetKind ? { targetKind } : {}),
-    relationship: options.relationship,
-    confidence: options.confidence,
-    source: options.source,
-    sourceLocation: options.sourceLocation,
+    sourceEntityId: source.id,
+    sourcePath: source.sourcePath,
+    targetName,
+    relationship,
+    resolution: resolution.status,
+    candidateEntityIds,
+    sourceLocation,
   });
-}
-
-function jsonPropertyPath(path: string, key: string): string {
-  return /^[A-Za-z_$][\w$]*$/.test(key) ? `${path}.${key}` : `${path}[${JSON.stringify(key)}]`;
-}
-
-function walkStrings(
-  value: unknown,
-  path: string,
-  visit: (text: string, jsonPath: string, key?: string) => void,
-  key?: string,
-  depth = 0,
-): void {
-  if (depth > 64) return;
-  if (typeof value === 'string') {
-    visit(value, path, key);
-    return;
-  }
-  if (Array.isArray(value)) {
-    value.forEach((item, index) => walkStrings(item, `${path}[${index}]`, visit, undefined, depth + 1));
-    return;
-  }
-  if (!isRecord(value)) return;
-  for (const [childKey, child] of Object.entries(value)) {
-    walkStrings(child, jsonPropertyPath(path, childKey), visit, childKey, depth + 1);
-  }
 }
 
 function numberPath(metadata: Readonly<Record<string, unknown>>, key: string): readonly number[] | undefined {
@@ -119,170 +128,349 @@ function isWithinDeclaredScope(entity: ForgeEntity, eventPath: readonly number[]
   return true;
 }
 
-function variableEntity(
+function resolveVariable(
   index: ProjectIndex,
   name: string,
   sourcePath: string,
   eventPath: readonly number[],
   functionId?: string,
-): ForgeEntity | undefined {
+): Resolution<ForgeEntity> {
   const candidates = targetCandidates(index, name, ['variable']);
   const visibleLocals = candidates.filter((entity) => {
     if (entity.sourcePath !== sourcePath || !isWithinDeclaredScope(entity, eventPath)) return false;
     const scope = entity.metadata.scope;
     const ownerFunction = entity.metadata.functionId;
-    // Event-sheet locals are scoped by indentation and remain visible inside
-    // function blocks nested in that indentation tree. Function locals and
-    // parameters are separately constrained to their owning function below.
     if (scope === 'local') return ownerFunction === undefined;
-    if (scope === 'function-local') return functionId !== undefined && ownerFunction === functionId;
-    return false;
+    return scope === 'function-local' && functionId !== undefined && ownerFunction === functionId;
   });
 
   if (visibleLocals.length > 0) {
     const depth = Math.max(...visibleLocals.map((entity) => numberPath(entity.metadata, 'scopePath')?.length ?? -1));
     const closest = visibleLocals.filter((entity) => (numberPath(entity.metadata, 'scopePath')?.length ?? -1) === depth);
-    return closest.length === 1 ? closest[0] : undefined;
+    return closest.length === 1
+      ? { status: 'resolved', value: closest[0] as ForgeEntity }
+      : { status: 'ambiguous', candidates: closest };
   }
 
   if (functionId !== undefined) {
     const parameters = candidates.filter((entity) =>
       (entity.metadata.scope === 'function-parameter' || entity.metadata.scope === 'custom-action-parameter')
       && entity.metadata.functionId === functionId);
-    if (parameters.length === 1) return parameters[0];
-    if (parameters.length > 1) return undefined;
+    if (parameters.length === 1) return { status: 'resolved', value: parameters[0] as ForgeEntity };
+    if (parameters.length > 1) return { status: 'ambiguous', candidates: parameters };
   }
 
   const globals = candidates.filter((entity) => entity.metadata.scope === 'global');
-  if (globals.length === 1) return globals[0];
-  return undefined;
+  if (globals.length === 1) return { status: 'resolved', value: globals[0] as ForgeEntity };
+  if (globals.length > 1) return { status: 'ambiguous', candidates: globals };
+  return { status: 'missing' };
 }
 
-function withoutExpressionStrings(value: string): string {
-  let quote: string | undefined;
-  let escaped = false;
-  let result = '';
-  for (const character of value) {
-    if (quote) {
-      result += ' ';
-      if (escaped) escaped = false;
-      else if (character === '\\') escaped = true;
-      else if (character === quote) quote = undefined;
-    } else if (character === '"' || character === "'" || character === '`') {
-      quote = character;
-      result += ' ';
-    } else {
-      result += character;
+function familyMemberships(resources: readonly ParsedResource[], index: ProjectIndex): FamilyMemberships {
+  const memberships = new Map<string, ForgeEntity[]>();
+  for (const resource of resources) {
+    if (resource.descriptor.kind !== 'family' || !isRecord(resource.raw) || !Array.isArray(resource.raw.members)) continue;
+    for (const member of resource.raw.members) {
+      const memberName = typeof member === 'string'
+        ? member
+        : isRecord(member) && typeof member.name === 'string' ? member.name : undefined;
+      if (!memberName) continue;
+      const object = resolveTarget(index, memberName, ['object']);
+      if (object.status !== 'resolved') continue;
+      const families = memberships.get(object.value.id) ?? [];
+      if (!families.some((family) => family.id === resource.entity.id)) families.push(resource.entity);
+      memberships.set(object.value.id, families);
     }
   }
-  return result;
+  return memberships;
 }
 
-function extractVariableExpressionReferences(
-  value: string,
-  source: ForgeEntity,
+function resolveInstanceVariable(
   index: ProjectIndex,
-  references: Map<string, ProjectReference>,
-  scope: EventScope,
-  location: ReferenceSourceLocation,
-): void {
-  const expression = withoutExpressionStrings(value);
-  const identifiers = [...expression.matchAll(/[A-Za-z_$][\w$]*/g)];
-  for (const match of identifiers) {
-    const name = match[0];
-    const start = match.index;
-    if (!name || start === undefined) continue;
+  owner: ForgeEntity,
+  variableName: string,
+  memberships: FamilyMemberships,
+): { readonly relationship: RelationshipKind; readonly resolution: Resolution<ForgeEntity> } {
+  const candidates = targetCandidates(index, variableName, ['variable']).filter((entity) => {
+    if (owner.kind === 'family') {
+      return entity.metadata.scope === 'family' && entity.metadata.familyName === owner.name;
+    }
+    if (owner.kind !== 'object') return false;
+    if (entity.metadata.scope === 'object' && entity.metadata.objectName === owner.name) return true;
+    const memberFamilies = memberships.get(owner.id) ?? [];
+    return entity.metadata.scope === 'family'
+      && memberFamilies.some((family) => family.name === entity.metadata.familyName);
+  });
+  const resolution: Resolution<ForgeEntity> = candidates.length === 1
+    ? { status: 'resolved', value: candidates[0] as ForgeEntity }
+    : candidates.length > 1
+      ? { status: 'ambiguous', candidates }
+      : { status: 'missing' };
+  const relationship: RelationshipKind = owner.kind === 'family'
+    || (candidates.length > 0 && candidates.every((candidate) => candidate.metadata.scope === 'family'))
+    ? 'family-variable-reference'
+    : 'instance-variable-reference';
+  return { relationship, resolution };
+}
 
-    const end = start + name.length;
-    const prefix = expression.slice(0, start).trimEnd();
-    const before = prefix.at(-1);
-    const after = expression.slice(end).trimStart()[0];
-    const sourceLocation = { ...location, expressionRange: { start, end } };
-
-    if (before === '.') {
-      const ownerPrefix = prefix.slice(0, -1).trimEnd();
-      const variables = targetCandidates(index, name, ['variable']).filter((entity) =>
-        [entity.metadata.objectName, entity.metadata.familyName].some((ownerName) => {
-          if (typeof ownerName !== 'string' || !ownerPrefix.endsWith(ownerName)) return false;
-          const precedingCharacter = ownerPrefix[ownerPrefix.length - ownerName.length - 1];
-          return precedingCharacter === undefined || !/[A-Za-z0-9_$]/.test(precedingCharacter);
-        }));
-      if (variables.length !== 1) continue;
-      const target = variables[0];
-      if (!target) continue;
-      const relationship = typeof target.metadata.familyName === 'string'
-        ? 'family-variable-expression'
-        : 'instance-variable-expression';
-      addReference(references, {
-        sourceEntity: source,
-        targetName: target.name,
-        relationship,
-        confidence: 'medium',
-        source: 'construct-expression',
-        index,
-        targetKinds: ['variable'],
-        resolvedTarget: target,
-        allowNameLookup: false,
-        sourceLocation,
-      });
+function tokenizeExpression(value: string): readonly ExpressionToken[] | undefined {
+  const tokens: ExpressionToken[] = [];
+  let index = 0;
+  while (index < value.length) {
+    if (tokens.length >= MAX_EXPRESSION_TOKENS) return undefined;
+    const character = value[index] as string;
+    if (/\s/.test(character)) {
+      index += 1;
       continue;
     }
 
-    if (after === '.' || after === '(') continue;
-    const target = variableEntity(index, name, source.sourcePath, scope.eventPath, scope.functionId);
-    if (!target) continue;
-    addReference(references, {
-      sourceEntity: source,
-      targetName: target.name,
-      relationship: 'event-variable-expression',
-      confidence: 'medium',
-      source: 'construct-expression',
-      index,
-      targetKinds: ['variable'],
-      resolvedTarget: target,
-      allowNameLookup: false,
-      sourceLocation,
-    });
+    if (character === '"') {
+      const start = index;
+      index += 1;
+      let closed = false;
+      while (index < value.length) {
+        if (value[index] === '"') {
+          if (value[index + 1] === '"') {
+            index += 2;
+            continue;
+          }
+          index += 1;
+          closed = true;
+          break;
+        }
+        index += 1;
+      }
+      if (!closed) return undefined;
+      tokens.push({ kind: 'string', value: value.slice(start, index), start, end: index });
+      continue;
+    }
+
+    if (/[A-Za-z_$]/.test(character)) {
+      const start = index;
+      index += 1;
+      while (index < value.length && /[A-Za-z0-9_$]/.test(value[index] as string)) index += 1;
+      tokens.push({ kind: 'identifier', value: value.slice(start, index), start, end: index });
+      continue;
+    }
+
+    if (/[0-9]/.test(character) || (character === '.' && /[0-9]/.test(value[index + 1] ?? ''))) {
+      const start = index;
+      const match = value.slice(index).match(/^(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?/);
+      if (!match) return undefined;
+      index += match[0].length;
+      tokens.push({ kind: 'number', value: match[0], start, end: index });
+      continue;
+    }
+
+    const pair = value.slice(index, index + 2);
+    if (['<=', '>=', '<>', '==', '!='].includes(pair)) {
+      tokens.push({ kind: 'symbol', value: pair, start: index, end: index + 2 });
+      index += 2;
+      continue;
+    }
+    if ('+-*/%^&|=<>(),.?!:'.includes(character)) {
+      tokens.push({ kind: 'symbol', value: character, start: index, end: index + 1 });
+      index += 1;
+      continue;
+    }
+    return undefined;
+  }
+  return tokens;
+}
+
+const BINARY_PRECEDENCE: Readonly<Record<string, number>> = {
+  '|': 1,
+  '&': 2,
+  '=': 3,
+  '==': 3,
+  '!=': 3,
+  '<>': 3,
+  '<': 3,
+  '<=': 3,
+  '>': 3,
+  '>=': 3,
+  '+': 4,
+  '-': 4,
+  '*': 5,
+  '/': 5,
+  '%': 5,
+  '^': 6,
+};
+
+function parseExpression(value: string): readonly ExpressionReference[] | undefined {
+  const tokenized = tokenizeExpression(value);
+  if (!tokenized) return undefined;
+  const tokens: readonly ExpressionToken[] = tokenized;
+  let position = 0;
+  const references: ExpressionReference[] = [];
+  const peek = () => tokens[position];
+  const take = () => tokens[position++];
+
+  function parseArguments(): boolean {
+    const opening = take();
+    if (opening?.value !== '(') return false;
+    if (peek()?.value === ')') {
+      take();
+      return true;
+    }
+    while (position < tokens.length) {
+      if (!parseBinary(0)) return false;
+      if (peek()?.value === ')') {
+        take();
+        return true;
+      }
+      if (take()?.value !== ',') return false;
+    }
+    return false;
+  }
+
+  function parsePrimary(): boolean {
+    const token = take();
+    if (!token) return false;
+    if (token.kind === 'number' || token.kind === 'string') return true;
+    if (token.value === '(') {
+      if (!parseBinary(0) || take()?.value !== ')') return false;
+      return true;
+    }
+    if (['+', '-', '!'].includes(token.value)
+      || (token.kind === 'identifier' && token.value.toLocaleLowerCase('en-US') === 'not')) {
+      return parsePrimary();
+    }
+    if (token.kind !== 'identifier') return false;
+
+    if (peek()?.value === '.') {
+      take();
+      const member = take();
+      if (!member || member.kind !== 'identifier') return false;
+      if (token.value === 'Functions') {
+        references.push({ kind: 'function', name: member.value, start: member.start, end: member.end });
+        if (peek()?.value === '(' && !parseArguments()) return false;
+        return true;
+      }
+      references.push({
+        kind: 'member',
+        owner: token.value,
+        name: member.value,
+        start: member.start,
+        end: member.end,
+      });
+      return true;
+    }
+
+    if (peek()?.value === '(') return parseArguments();
+    references.push({ kind: 'identifier', name: token.value, start: token.start, end: token.end });
+    return true;
+  }
+
+  function parseBinary(minimumPrecedence: number): boolean {
+    if (!parsePrimary()) return false;
+    while (position < tokens.length) {
+      const next = peek();
+      if (!next || next.kind !== 'symbol') break;
+      if (next.value === '?' && minimumPrecedence === 0) {
+        take();
+        if (!parseBinary(0) || take()?.value !== ':' || !parseBinary(0)) return false;
+        continue;
+      }
+      const precedence = BINARY_PRECEDENCE[next.value] ?? -1;
+      if (precedence < minimumPrecedence) break;
+      take();
+      if (!parseBinary(precedence + 1)) return false;
+    }
+    return true;
+  }
+
+  if (tokens.length === 0 || !parseBinary(0) || position !== tokens.length) return undefined;
+  return references;
+}
+
+function addExpressionRelationships(
+  expression: string,
+  source: ForgeEntity,
+  index: ProjectIndex,
+  memberships: FamilyMemberships,
+  collector: RelationshipCollector,
+  scope: EventScope,
+  location: ReferenceSourceLocation,
+  expressionOwner?: ForgeEntity,
+): void {
+  if (expression.length > MAX_EXPRESSION_LENGTH) {
+    collector.unsupportedExpressionCount += 1;
+    return;
+  }
+  const expressionReferences = parseExpression(expression);
+  if (!expressionReferences) {
+    collector.unsupportedExpressionCount += 1;
+    return;
+  }
+
+  for (const occurrence of expressionReferences) {
+    const sourceLocation = {
+      ...location,
+      expressionRange: { start: occurrence.start, end: occurrence.end },
+    };
+    if (occurrence.kind === 'function') {
+      addRelationship(collector, source, 'function-call', occurrence.name,
+        resolveTarget(index, occurrence.name, ['function']), sourceLocation);
+      continue;
+    }
+
+    if (occurrence.kind === 'member') {
+      if (occurrence.owner === 'Self') {
+        if (!expressionOwner) continue;
+        const variable = resolveInstanceVariable(index, expressionOwner, occurrence.name, memberships);
+        if (variable.resolution.status !== 'missing') {
+          addRelationship(collector, source, variable.relationship, `Self.${occurrence.name}`, variable.resolution, sourceLocation);
+        }
+        continue;
+      }
+      const ownerResolution = resolveTarget(index, occurrence.owner ?? '', EVENT_REFERENCE_KINDS);
+      if (ownerResolution.status === 'missing') continue;
+      addRelationship(collector, source, 'object-reference', occurrence.owner ?? '', ownerResolution, {
+        ...sourceLocation,
+        expressionRange: {
+          start: Math.max(0, occurrence.start - (occurrence.owner?.length ?? 0) - 1),
+          end: occurrence.start - 1,
+        },
+      });
+      if (ownerResolution.status !== 'resolved') continue;
+      const variable = resolveInstanceVariable(index, ownerResolution.value, occurrence.name, memberships);
+      if (variable.resolution.status !== 'missing') {
+        addRelationship(collector, source, variable.relationship, `${occurrence.owner}.${occurrence.name}`, variable.resolution, sourceLocation);
+      }
+      continue;
+    }
+
+    const variableResolution = resolveVariable(index, occurrence.name, source.sourcePath, scope.eventPath, scope.functionId);
+    if (variableResolution.status !== 'missing'
+      || targetCandidates(index, occurrence.name, ['variable']).length > 0) {
+      addRelationship(collector, source, 'event-variable-reference', occurrence.name, variableResolution, sourceLocation);
+    }
   }
 }
 
-function extractFamilyReferences(resource: ParsedResource, index: ProjectIndex, references: Map<string, ProjectReference>): void {
+function extractFamilyRelationships(resource: ParsedResource, index: ProjectIndex, collector: RelationshipCollector): void {
   if (resource.descriptor.kind !== 'family' || !isRecord(resource.raw) || !Array.isArray(resource.raw.members)) return;
   resource.raw.members.forEach((member, memberIndex) => {
     const memberName = typeof member === 'string'
       ? member
       : isRecord(member) && typeof member.name === 'string' ? member.name : undefined;
     if (!memberName) return;
-    addReference(references, {
-      sourceEntity: resource.entity,
-      targetName: memberName,
-      relationship: 'family-member',
-      confidence: 'high',
-      source: 'semantic',
-      index,
-      targetKinds: ['object'],
-      sourceLocation: { jsonPath: `$.members[${memberIndex}]` },
-    });
+    addRelationship(collector, resource.entity, 'family-member', memberName,
+      resolveTarget(index, memberName, ['object']), { jsonPath: `$.members[${memberIndex}]` });
   });
 }
 
-function extractLayoutReferences(resource: ParsedResource, index: ProjectIndex, references: Map<string, ProjectReference>): void {
+function extractLayoutRelationships(resource: ParsedResource, index: ProjectIndex, collector: RelationshipCollector): void {
   if (resource.descriptor.kind !== 'layout' || !isRecord(resource.raw)) return;
   const visitLayer = (layer: unknown, path: string, depth: number): void => {
     if (!isRecord(layer) || depth > 48) return;
     if (Array.isArray(layer.instances)) {
       layer.instances.forEach((instance, instanceIndex) => {
         if (!isRecord(instance) || typeof instance.type !== 'string') return;
-        addReference(references, {
-          sourceEntity: resource.entity,
-          targetName: instance.type,
-          relationship: 'layout-instance',
-          confidence: 'high',
-          source: 'semantic',
-          index,
-          targetKinds: EVENT_REFERENCE_KINDS,
-          sourceLocation: { jsonPath: `${path}.instances[${instanceIndex}].type` },
-        });
+        addRelationship(collector, resource.entity, 'layout-instance', instance.type,
+          resolveTarget(index, instance.type, EVENT_REFERENCE_KINDS),
+          { jsonPath: `${path}.instances[${instanceIndex}].type` });
       });
     }
     for (const key of ['subLayers', 'layers']) {
@@ -295,39 +483,17 @@ function extractLayoutReferences(resource: ParsedResource, index: ProjectIndex, 
     resource.raw.layers.forEach((layer, layerIndex) => visitLayer(layer, `$.layers[${layerIndex}]`, 0));
   }
   if (typeof resource.raw.eventSheet === 'string') {
-    addReference(references, {
-      sourceEntity: resource.entity,
-      targetName: resource.raw.eventSheet,
-      relationship: 'layout-event-sheet',
-      confidence: 'high',
-      source: 'semantic',
-      index,
-      targetKinds: ['eventSheet'],
-      sourceLocation: { jsonPath: '$.eventSheet' },
-    });
+    addRelationship(collector, resource.entity, 'layout-event-sheet', resource.raw.eventSheet,
+      resolveTarget(index, resource.raw.eventSheet, ['eventSheet']), { jsonPath: '$.eventSheet' });
   }
 }
 
-function eventScope(
-  node: Record<string, unknown>,
-  eventPath: readonly number[],
-  eventJsonPath: string,
-  functionEntity?: ForgeEntity,
-  functionId?: string,
-  functionSid?: string,
-): EventScope {
-  const eventSid = typeof node.sid === 'string' || typeof node.sid === 'number' ? String(node.sid) : undefined;
-  return {
-    eventPath,
-    eventJsonPath,
-    ...(eventSid ? { eventSid } : {}),
-    ...(functionEntity ? { functionEntity } : {}),
-    ...(functionId ? { functionId } : {}),
-    ...(functionSid ? { functionSid } : {}),
-  };
-}
-
-function extractEventSheetReferences(resource: ParsedResource, index: ProjectIndex, references: Map<string, ProjectReference>): void {
+function extractEventSheetRelationships(
+  resource: ParsedResource,
+  index: ProjectIndex,
+  collector: RelationshipCollector,
+  memberships: FamilyMemberships,
+): void {
   if (resource.descriptor.kind !== 'eventSheet' || !isRecord(resource.raw) || !Array.isArray(resource.raw.events)) return;
 
   const visit = (
@@ -340,63 +506,54 @@ function extractEventSheetReferences(resource: ParsedResource, index: ProjectInd
   ): void => {
     if (!isRecord(node) || eventPath.length > 64) return;
     const eventType = typeof node.eventType === 'string' ? node.eventType : '';
-    const declaredFunction = eventType === 'function-block'
-      ? (index.byKind.get('function') ?? []).find((entity) =>
+    const sid = typeof node.sid === 'string' || typeof node.sid === 'number' ? String(node.sid) : undefined;
+    const declaredFunctionCandidates = eventType === 'function-block'
+      ? (index.byKind.get('function') ?? []).filter((entity) =>
           entity.sourcePath === resource.entity.sourcePath
           && entity.name === node.functionName
-          && (typeof node.sid !== 'string' && typeof node.sid !== 'number'
-            || String(entity.metadata.sid) === String(node.sid)))
-      : undefined;
+          && (sid === undefined || String(entity.metadata.sid) === sid))
+      : [];
+    const declaredFunction = declaredFunctionCandidates.length === 1 ? declaredFunctionCandidates[0] : undefined;
     const functionEntity = declaredFunction ?? parentFunction;
-    const ownSid = typeof node.sid === 'string' || typeof node.sid === 'number' ? String(node.sid) : undefined;
-    const customActionName = eventType === 'custom-ace-block'
-      && typeof node.aceName === 'string' ? node.aceName : undefined;
-    const customActionId = customActionName
-      ? `custom-action:${resource.entity.id}:${ownSid ?? eventPath.join('.')}`
-      : undefined;
+    const customActionName = eventType === 'custom-ace-block' && typeof node.aceName === 'string' ? node.aceName : undefined;
+    const customActionId = customActionName ? `custom-action:${resource.entity.id}:${sid ?? eventPath.join('.')}` : undefined;
     const functionId = declaredFunction?.id ?? customActionId ?? parentFunctionId ?? functionEntity?.id;
-    const functionSid = declaredFunction ? ownSid : parentFunctionSid;
-    const scope = eventScope(node, eventPath, eventJsonPath, functionEntity, functionId, functionSid);
+    const functionSid = declaredFunction ? sid : parentFunctionSid;
+    const scope: EventScope = {
+      eventPath,
+      ...(functionEntity ? { functionEntity } : {}),
+      ...(functionId ? { functionId } : {}),
+      ...(functionSid ? { functionSid } : {}),
+    };
     const source = functionEntity ?? resource.entity;
+    const eventSid = sid;
 
     if (eventType === 'include' && typeof node.includeSheet === 'string') {
-      addReference(references, {
-        sourceEntity: resource.entity,
-        targetName: node.includeSheet,
-        relationship: 'event-sheet-include',
-        confidence: 'high',
-        source: 'semantic',
-        index,
-        targetKinds: ['eventSheet'],
-        sourceLocation: {
-          ...(scope.eventSid ? { eventSid: scope.eventSid } : {}),
+      addRelationship(collector, resource.entity, 'event-sheet-include', node.includeSheet,
+        resolveTarget(index, node.includeSheet, ['eventSheet']), {
+          ...(eventSid ? { eventSid } : {}),
           eventPath: eventJsonPath,
           jsonPath: `${eventJsonPath}.includeSheet`,
-        },
-      });
+        });
     }
 
     const inspectEntry = (entry: Record<string, unknown>, entryKind: 'condition' | 'action', entryIndex: number): void => {
       const entryPath = `${eventJsonPath}.${entryKind === 'condition' ? 'conditions' : 'actions'}[${entryIndex}]`;
       const entryLocation: ReferenceSourceLocation = {
-        ...(scope.eventSid ? { eventSid: scope.eventSid } : {}),
+        ...(eventSid ? { eventSid } : {}),
         ...(scope.functionSid ? { functionSid: scope.functionSid } : {}),
         eventPath: eventJsonPath,
         entryKind,
         entryIndex,
       };
       const objectClass = typeof entry.objectClass === 'string' ? entry.objectClass : undefined;
+      const objectClassResolution = objectClass && !NON_OBJECT_CLASSES.has(objectClass.toLowerCase())
+        ? resolveTarget(index, objectClass, EVENT_REFERENCE_KINDS)
+        : undefined;
       if (objectClass && !NON_OBJECT_CLASSES.has(objectClass.toLowerCase())) {
-        addReference(references, {
-          sourceEntity: source,
-          targetName: objectClass,
-          relationship: 'event-object-reference',
-          confidence: 'high',
-          source: 'semantic',
-          index,
-          targetKinds: EVENT_REFERENCE_KINDS,
-          sourceLocation: { ...entryLocation, jsonPath: `${entryPath}.objectClass` },
-        });
+        addRelationship(collector, source, 'object-reference', objectClass,
+          objectClassResolution ?? { status: 'missing' },
+          { ...entryLocation, jsonPath: `${entryPath}.objectClass` });
       }
 
       const entryId = typeof entry.id === 'string' ? entry.id : '';
@@ -407,79 +564,46 @@ function extractEventSheetReferences(resource: ParsedResource, index: ProjectInd
         && ((entryKind === 'action' && EVENT_VARIABLE_PARAMETER_ACTIONS.has(entryId))
           || (entryKind === 'condition' && EVENT_VARIABLE_PARAMETER_CONDITIONS.has(entryId)));
       if (isEventVariableReference && variableName) {
-        const target = variableEntity(index, variableName, resource.entity.sourcePath, scope.eventPath, scope.functionId);
-        addReference(references, {
-          sourceEntity: source,
-          targetName: variableName,
-          relationship: entryKind === 'action' ? 'event-variable-action' : 'event-variable-condition',
-          confidence: 'high',
-          source: 'semantic',
-          index,
-          targetKinds: ['variable'],
-          ...(target ? { resolvedTarget: target } : {}),
-          allowNameLookup: false,
-          sourceLocation: { ...entryLocation, jsonPath: `${entryPath}.parameters.variable` },
-        });
+        addRelationship(collector, source, 'event-variable-reference', variableName,
+          resolveVariable(index, variableName, resource.entity.sourcePath, scope.eventPath, scope.functionId),
+          { ...entryLocation, jsonPath: `${entryPath}.parameters.variable` });
+      }
+
+      const instanceVariableName = parameters && typeof parameters['instance-variable'] === 'string'
+        ? parameters['instance-variable'] : undefined;
+      if (objectClass && instanceVariableName) {
+        const ownerResolution = resolveTarget(index, objectClass, EVENT_REFERENCE_KINDS);
+        if (ownerResolution.status === 'resolved') {
+          const variable = resolveInstanceVariable(index, ownerResolution.value, instanceVariableName, memberships);
+          addRelationship(collector, source, variable.relationship, `${objectClass}.${instanceVariableName}`, variable.resolution,
+            { ...entryLocation, jsonPath: `${entryPath}.parameters.instance-variable` });
+        }
       }
 
       if (typeof entry.callFunction === 'string') {
-        addReference(references, {
-          sourceEntity: source,
-          targetName: entry.callFunction,
-          relationship: 'function-call',
-          confidence: 'high',
-          source: 'semantic',
-          index,
-          targetKinds: ['function'],
-          sourceLocation: { ...entryLocation, jsonPath: `${entryPath}.callFunction` },
-        });
+        addRelationship(collector, source, 'function-call', entry.callFunction,
+          resolveTarget(index, entry.callFunction, ['function']),
+          { ...entryLocation, jsonPath: `${entryPath}.callFunction` });
       }
 
-      walkStrings(entry, entryPath, (value, jsonPath, key) => {
-        if (!key || (!EXPRESSION_PARAMETER_NAMES.has(key) && !/(?:expression|parameter|value)/i.test(key))) return;
-        const functionPattern = /\bFunctions\.([A-Za-z_$][\w$]*)\s*\(/g;
-        for (const match of value.matchAll(functionPattern)) {
-          const calledName = match[1];
-          if (!calledName || match.index === undefined) continue;
-          const start = match.index + match[0].indexOf(calledName);
-          addReference(references, {
-            sourceEntity: source,
-            targetName: calledName,
-            relationship: 'function-call-expression',
-            confidence: 'high',
-            source: 'semantic',
-            index,
-            targetKinds: ['function'],
-            sourceLocation: {
-              ...entryLocation,
-              jsonPath,
-              expressionRange: { start, end: start + calledName.length },
-            },
-          });
-        }
-        extractVariableExpressionReferences(value, source, index, references, scope, {
+      if (!parameters) return;
+      for (const [parameterName, parameterValue] of Object.entries(parameters)) {
+        if (!EXPRESSION_PARAMETER_NAMES.has(parameterName) || typeof parameterValue !== 'string') continue;
+        addExpressionRelationships(parameterValue, source, index, memberships, collector, scope, {
           ...entryLocation,
-          jsonPath,
-        });
-      });
+          jsonPath: `${entryPath}.parameters.${parameterName}`,
+        }, objectClassResolution?.status === 'resolved' ? objectClassResolution.value : undefined);
+      }
     };
 
     if (typeof node.callFunction === 'string') {
-      addReference(references, {
-        sourceEntity: source,
-        targetName: node.callFunction,
-        relationship: 'function-call',
-        confidence: 'high',
-        source: 'semantic',
-        index,
-        targetKinds: ['function'],
-        sourceLocation: {
-          ...(scope.eventSid ? { eventSid: scope.eventSid } : {}),
+      addRelationship(collector, source, 'function-call', node.callFunction,
+        resolveTarget(index, node.callFunction, ['function']), {
+          ...(eventSid ? { eventSid } : {}),
           ...(scope.functionSid ? { functionSid: scope.functionSid } : {}),
           eventPath: eventJsonPath,
           jsonPath: `${eventJsonPath}.callFunction`,
-        },
-      });
+        });
     }
 
     for (const entryKind of ['condition', 'action'] as const) {
@@ -507,60 +631,28 @@ function extractEventSheetReferences(resource: ParsedResource, index: ProjectInd
   resource.raw.events.forEach((event, eventIndex) => visit(event, [eventIndex], `$.events[${eventIndex}]`));
 }
 
-function exactStrings(value: unknown, visit: (text: string, jsonPath: string) => void, path = '$', depth = 0): void {
-  if (depth > 64) return;
-  if (typeof value === 'string') {
-    visit(value, path);
-  } else if (Array.isArray(value)) {
-    value.forEach((item, index) => exactStrings(item, visit, `${path}[${index}]`, depth + 1));
-  } else if (isRecord(value)) {
-    for (const [key, item] of Object.entries(value)) {
-      exactStrings(item, visit, jsonPropertyPath(path, key), depth + 1);
-    }
-  }
-}
-
-/** Prefer format-aware extraction. Exact string equality remains an explicitly low-confidence fallback. */
-export function extractProjectReferences(resources: readonly ParsedResource[], index: ProjectIndex): readonly ProjectReference[] {
-  const references = new Map<string, ProjectReference>();
+/** Emits only supported Construct relationships that resolve to exactly one indexed entity. */
+export function extractProjectRelationships(resources: readonly ParsedResource[], index: ProjectIndex): {
+  readonly references: readonly ProjectReference[];
+  readonly unresolvedReferences: readonly UnresolvedProjectReference[];
+  readonly unsupportedExpressionCount: number;
+} {
+  const collector: RelationshipCollector = {
+    references: new Map(),
+    unresolvedReferences: new Map(),
+    unsupportedExpressionCount: 0,
+  };
+  const memberships = familyMemberships(resources, index);
   for (const resource of resources) {
-    extractFamilyReferences(resource, index, references);
-    extractLayoutReferences(resource, index, references);
-    extractEventSheetReferences(resource, index, references);
+    extractFamilyRelationships(resource, index, collector);
+    extractLayoutRelationships(resource, index, collector);
+    extractEventSheetRelationships(resource, index, collector, memberships);
   }
-
-  const semanticOccurrences = new Set<string>();
-  for (const reference of references.values()) {
-    const jsonPath = reference.sourceLocation?.jsonPath;
-    if (reference.source !== 'exact-string-fallback' && reference.targetEntityId && jsonPath) {
-      semanticOccurrences.add(JSON.stringify([reference.sourcePath, reference.targetEntityId, jsonPath]));
-    }
-  }
-
-  for (const resource of resources) {
-    if (resource.raw === undefined || resource.descriptor.kind === 'flowchart') continue;
-    exactStrings(resource.raw, (value, jsonPath) => {
-      const matches = targetCandidates(index, value, FALLBACK_KINDS);
-      for (const target of matches) {
-        const occurrenceKey = JSON.stringify([resource.entity.sourcePath, target.id, jsonPath]);
-        if (target.id === resource.entity.id || semanticOccurrences.has(occurrenceKey)) continue;
-        addReference(references, {
-          sourceEntity: resource.entity,
-          targetName: target.name,
-          relationship: 'exact-string-match',
-          confidence: 'low',
-          source: 'exact-string-fallback',
-          index,
-          targetKinds: [target.kind],
-          resolvedTarget: target,
-          allowNameLookup: false,
-          sourceLocation: { jsonPath },
-        });
-      }
-    });
-  }
-
-  return [...references.values()];
+  return {
+    references: [...collector.references.values()],
+    unresolvedReferences: [...collector.unresolvedReferences.values()],
+    unsupportedExpressionCount: collector.unsupportedExpressionCount,
+  };
 }
 
 export function createReferenceIndexes(references: readonly ProjectReference[]): {
@@ -570,16 +662,12 @@ export function createReferenceIndexes(references: readonly ProjectReference[]):
   const bySource = new Map<string, ProjectReference[]>();
   const byTarget = new Map<string, ProjectReference[]>();
   for (const reference of references) {
-    if (reference.sourceEntityId) {
-      const matches = bySource.get(reference.sourceEntityId) ?? [];
-      matches.push(reference);
-      bySource.set(reference.sourceEntityId, matches);
-    }
-    if (reference.targetEntityId) {
-      const matches = byTarget.get(reference.targetEntityId) ?? [];
-      matches.push(reference);
-      byTarget.set(reference.targetEntityId, matches);
-    }
+    const sourceMatches = bySource.get(reference.sourceEntityId) ?? [];
+    sourceMatches.push(reference);
+    bySource.set(reference.sourceEntityId, sourceMatches);
+    const targetMatches = byTarget.get(reference.targetEntityId) ?? [];
+    targetMatches.push(reference);
+    byTarget.set(reference.targetEntityId, targetMatches);
   }
   return { referencesBySource: bySource, referencesByTarget: byTarget };
 }
@@ -587,36 +675,19 @@ export function createReferenceIndexes(references: readonly ProjectReference[]):
 export function createProjectDependencies(references: readonly ProjectReference[]): readonly ProjectDependency[] {
   const groups = new Map<string, { reference: ProjectReference; occurrenceIds: string[] }>();
   for (const reference of references) {
-    const targetIdentity = reference.targetEntityId ?? `${reference.targetKind ?? ''}:${reference.targetName}`;
-    const key = JSON.stringify([
-      reference.sourceEntityId ?? reference.sourcePath,
-      targetIdentity,
-      reference.relationship,
-      reference.confidence,
-      reference.source,
-    ]);
+    const key = JSON.stringify([reference.sourceEntityId, reference.relationship, reference.targetEntityId]);
     const group = groups.get(key);
-    if (group) {
-      group.occurrenceIds.push(reference.id);
-    } else {
-      groups.set(key, { reference, occurrenceIds: [reference.id] });
-    }
+    if (group) group.occurrenceIds.push(reference.id);
+    else groups.set(key, { reference, occurrenceIds: [reference.id] });
   }
 
   return [...groups.values()].map(({ reference, occurrenceIds }) => ({
-    id: [reference.sourceEntityId ?? reference.sourcePath, reference.relationship,
-      reference.targetEntityId ?? `${reference.targetKind ?? ''}:${reference.targetName}`,
-      reference.confidence, reference.source]
+    id: [reference.sourceEntityId, reference.relationship, reference.targetEntityId]
       .map(encodeURIComponent)
       .join(':'),
-    ...(reference.sourceEntityId ? { sourceEntityId: reference.sourceEntityId } : {}),
-    sourcePath: reference.sourcePath,
-    ...(reference.targetEntityId ? { targetEntityId: reference.targetEntityId } : {}),
-    targetName: reference.targetName,
-    ...(reference.targetKind ? { targetKind: reference.targetKind } : {}),
+    sourceEntityId: reference.sourceEntityId,
     relationship: reference.relationship,
-    confidence: reference.confidence,
-    source: reference.source,
+    targetEntityId: reference.targetEntityId,
     occurrenceIds,
   }));
 }
