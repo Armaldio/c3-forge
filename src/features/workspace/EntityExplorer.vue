@@ -34,14 +34,42 @@ const groups = computed(() => kindGroups.map((group) => ({
 watch(() => props.selectedEntityId, async (selectedId) => {
   if (!selectedId) return
   await nextTick()
+  if (props.selectedEntityId !== selectedId) return
 
-  const selectedButton = [...(explorerRoot.value?.querySelectorAll<HTMLElement>('[data-entity-id]') ?? [])]
+  const root = explorerRoot.value
+  const selectedButton = [...(root?.querySelectorAll<HTMLElement>('[data-entity-id]') ?? [])]
     .find((button) => button.dataset.entityId === selectedId)
+  if (!root || !selectedButton) return
+
   const kindSection = selectedButton?.closest<HTMLDetailsElement>('details[data-entity-kind]')
   const groupSection = selectedButton?.closest<HTMLDetailsElement>('details[data-explorer-group]')
-  if (groupSection) groupSection.open = true
-  if (kindSection) kindSection.open = true
+
+  if (groupSection && !groupSection.open) groupSection.open = true
+  if (kindSection && !kindSection.open) kindSection.open = true
+
+  await nextTick()
+  if (props.selectedEntityId !== selectedId || !selectedButton.isConnected) return
+  if (isVisibleInExplorer(root, selectedButton)) return
+
+  selectedButton.scrollIntoView({ block: 'nearest' })
 }, { immediate: true })
+
+function isVisibleInExplorer(root: HTMLElement, entity: HTMLElement): boolean {
+  const rootBounds = root.getBoundingClientRect()
+  const entityBounds = entity.getBoundingClientRect()
+  const headerBounds = root.querySelector<HTMLElement>('.pane-heading')?.getBoundingClientRect()
+  const viewportWidth = document.documentElement.clientWidth
+  const viewportHeight = document.documentElement.clientHeight
+  const visibleLeft = Math.max(rootBounds.left, 0)
+  const visibleRight = Math.min(rootBounds.right, viewportWidth)
+  const visibleTop = Math.max(rootBounds.top, headerBounds?.bottom ?? rootBounds.top, 0)
+  const visibleBottom = Math.min(rootBounds.bottom, viewportHeight)
+
+  return entityBounds.left >= visibleLeft
+    && entityBounds.right <= visibleRight
+    && entityBounds.top >= visibleTop
+    && entityBounds.bottom <= visibleBottom
+}
 
 function entityLabel(entity: ForgeEntity): string {
   return entity.name || entity.sourcePath

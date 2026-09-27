@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import type { ForgeEntity, ProjectAnalysis, ProjectReference } from '../../core/types'
-import { entityKindLabel, formatMetadataValue } from './presentation'
+import { chooseRelationshipTab, entityKindLabel, formatMetadataValue } from './presentation'
 
 const props = defineProps<{
   analysis: ProjectAnalysis
@@ -92,6 +92,15 @@ const relationshipSections = computed<readonly RelationshipSection[]>(() => [
 ])
 
 const activeSection = computed(() => relationshipSections.value.find((section) => section.direction === activeDirection.value))
+const relationshipTabCounts = computed(() => ({
+  entityId: props.selectedEntityId,
+  incoming: relationshipSections.value.find((section) => section.direction === 'incoming')?.count ?? 0,
+  outgoing: relationshipSections.value.find((section) => section.direction === 'outgoing')?.count ?? 0,
+}))
+
+watch(relationshipTabCounts, ({ incoming, outgoing }) => {
+  activeDirection.value = chooseRelationshipTab(activeDirection.value, incoming, outgoing)
+}, { immediate: true })
 
 function referenceGroups(
   analysis: ProjectAnalysis,
@@ -280,10 +289,6 @@ function handleTabKeydown(event: KeyboardEvent): void {
                       class="reference-row"
                     >
                       <div class="reference-row-main">
-                        <span
-                          v-if="activeSection.direction === 'outgoing'"
-                          class="reference-target-name"
-                        >{{ reference.targetName }}</span>
                         <span class="reference-relationship">{{ relationshipLabel(reference.relationship) }}</span>
                         <span
                           class="reference-source-tag"

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { DiagnosticSeverity, ProjectAnalysis } from '../../core/types'
+import { summarizeProjectDiagnostics } from './presentation'
 
 const props = defineProps<{
   analysis: ProjectAnalysis
@@ -11,13 +12,13 @@ const emit = defineEmits<{
 }>()
 
 const severityOrder: readonly DiagnosticSeverity[] = ['error', 'warning', 'info']
-const summary = computed(() => severityOrder.map((severity) => ({
+const summary = computed(() => summarizeProjectDiagnostics(props.analysis.diagnostics))
+const severityRows = computed(() => severityOrder.map((severity) => ({
   severity,
-  count: props.analysis.stats.diagnosticsBySeverity[severity] ?? 0,
+  count: summary.value.counts[severity],
 })))
 const findings = computed(() => props.analysis.diagnostics)
-const findingCount = computed(() => findings.value.length)
-const hasFindings = computed(() => findingCount.value > 0)
+const hasFindings = computed(() => summary.value.total > 0)
 </script>
 
 <template>
@@ -34,7 +35,7 @@ const hasFindings = computed(() => findingCount.value > 0)
           Diagnostics
         </h2>
       </div>
-      <span class="count-chip">{{ findingCount }}</span>
+      <span class="count-chip">{{ summary.total }}</span>
       <button
         class="diagnostics-close"
         type="button"
@@ -50,7 +51,7 @@ const hasFindings = computed(() => findingCount.value > 0)
       aria-label="Diagnostic counts by severity"
     >
       <li
-        v-for="item in summary"
+        v-for="item in severityRows"
         :key="item.severity"
         :data-severity="item.severity"
       >
@@ -71,7 +72,7 @@ const hasFindings = computed(() => findingCount.value > 0)
         class="clear-mark"
         aria-hidden="true"
       >✓</span>
-      No project issues detected.
+      No issues detected.
     </p>
 
     <section

@@ -1,4 +1,19 @@
-import type { EntityKind, JsonValue, ProjectLoadStage } from '../../core/types'
+import type {
+  DiagnosticSeverity,
+  EntityKind,
+  JsonValue,
+  ProjectDiagnostic,
+  ProjectLoadStage,
+} from '../../core/types'
+
+export type RelationshipTab = 'incoming' | 'outgoing'
+
+export interface ProjectDiagnosticSummary {
+  readonly counts: Readonly<Record<DiagnosticSeverity, number>>
+  readonly total: number
+  readonly state: 'error' | 'warning' | 'info' | 'clear'
+  readonly label: string
+}
 
 export const entityKindLabel: Readonly<Record<EntityKind, string>> = {
   object: 'Object',
@@ -45,4 +60,34 @@ export function formatMetadataValue(value: JsonValue): string {
     return String(value)
   }
   return JSON.stringify(value)
+}
+
+export function summarizeProjectDiagnostics(
+  diagnostics: readonly ProjectDiagnostic[],
+): ProjectDiagnosticSummary {
+  const counts: Record<DiagnosticSeverity, number> = { error: 0, warning: 0, info: 0 }
+  for (const diagnostic of diagnostics) counts[diagnostic.severity] += 1
+
+  const total = counts.error + counts.warning + counts.info
+  const state = counts.error > 0 ? 'error'
+    : counts.warning > 0 ? 'warning'
+      : counts.info > 0 ? 'info' : 'clear'
+  const label = [
+    counts.error ? `${counts.error} ${counts.error === 1 ? 'error' : 'errors'}` : '',
+    counts.warning ? `${counts.warning} ${counts.warning === 1 ? 'warning' : 'warnings'}` : '',
+    counts.info ? `${counts.info} ${counts.info === 1 ? 'note' : 'notes'}` : '',
+  ].filter(Boolean).join(' · ') || 'No issues detected'
+
+  return { counts, total, state, label }
+}
+
+export function chooseRelationshipTab(
+  current: RelationshipTab,
+  incomingCount: number,
+  outgoingCount: number,
+): RelationshipTab {
+  const currentCount = current === 'incoming' ? incomingCount : outgoingCount
+  const otherCount = current === 'incoming' ? outgoingCount : incomingCount
+  if (currentCount > 0 || otherCount === 0) return current
+  return current === 'incoming' ? 'outgoing' : 'incoming'
 }

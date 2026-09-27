@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import type { ForgeEntity, ProjectAnalysis, ProjectLoadStage } from '../../core/types'
 import EntityExplorer from './EntityExplorer.vue'
 import EntityInspector from './EntityInspector.vue'
 import GlobalSearch from './GlobalSearch.vue'
 import ProjectDiagnostics from './ProjectDiagnostics.vue'
 import ProjectOverview from './ProjectOverview.vue'
-import { loadStageLabel } from './presentation'
+import { loadStageLabel, summarizeProjectDiagnostics } from './presentation'
 
 const props = defineProps<{
   analysis: ProjectAnalysis | null
@@ -30,17 +30,13 @@ const emit = defineEmits<{
 const loadingLabel = computed(() => props.loadingStage ? loadStageLabel[props.loadingStage] : 'Preparing project')
 const archiveInput = ref<HTMLInputElement | null>(null)
 const projectMenu = ref<HTMLDetailsElement | null>(null)
+const diagnosticsToggle = ref<HTMLButtonElement | null>(null)
 const diagnosticsOpen = ref(false)
-const diagnosticCount = computed(() => props.analysis?.diagnostics.length ?? 0)
-const diagnosticHealth = computed(() => {
-  const counts = props.analysis?.stats.diagnosticsBySeverity
-  if (!counts || diagnosticCount.value === 0) return 'Project healthy'
-  const parts = [
-    counts.error ? `${counts.error} ${counts.error === 1 ? 'error' : 'errors'}` : '',
-    counts.warning ? `${counts.warning} ${counts.warning === 1 ? 'warning' : 'warnings'}` : '',
-    counts.info ? `${counts.info} ${counts.info === 1 ? 'note' : 'notes'}` : '',
-  ].filter(Boolean)
-  return parts.join(' · ')
+const diagnosticSummary = computed(() => summarizeProjectDiagnostics(props.analysis?.diagnostics ?? []))
+const diagnosticMark = computed(() => {
+  if (diagnosticSummary.value.state === 'clear') return '✓'
+  if (diagnosticSummary.value.state === 'info') return 'i'
+  return '!'
 })
 
 function closeProjectMenu(): void {
@@ -55,6 +51,15 @@ function chooseFolder(): void {
 function chooseArchive(): void {
   closeProjectMenu()
   archiveInput.value?.click()
+}
+
+function toggleDiagnostics(): void {
+  diagnosticsOpen.value = !diagnosticsOpen.value
+}
+
+function closeDiagnostics(): void {
+  diagnosticsOpen.value = false
+  void nextTick(() => diagnosticsToggle.value?.focus())
 }
 
 function handleArchiveSelection(event: Event): void {
@@ -225,30 +230,33 @@ function handleArchiveSelection(event: Event): void {
         <div class="workspace-statusbar">
           <p
             class="project-health"
-            :data-health="diagnosticCount ? 'issues' : 'healthy'"
+            :data-health="diagnosticSummary.state"
+            role="status"
           >
-            <span aria-hidden="true">{{ diagnosticCount ? '!' : '✓' }}</span>
-            {{ diagnosticHealth }}
+            <span aria-hidden="true">{{ diagnosticMark }}</span>
+            {{ diagnosticSummary.label }}
           </p>
           <button
+            ref="diagnosticsToggle"
             class="diagnostics-toggle"
             type="button"
             aria-controls="diagnostics-drawer"
             :aria-expanded="diagnosticsOpen"
-            @click="diagnosticsOpen = !diagnosticsOpen"
+            @click="toggleDiagnostics"
           >
-            Diagnostics <span>{{ diagnosticCount }}</span>
+            Diagnostics <span>{{ diagnosticSummary.total }}</span>
           </button>
         </div>
 
         <div
           v-show="diagnosticsOpen"
           id="diagnostics-drawer"
+          :inert="!diagnosticsOpen"
           class="diagnostics-drawer"
         >
           <ProjectDiagnostics
             :analysis="analysis"
-            @close="diagnosticsOpen = false"
+            @close="closeDiagnostics"
           />
         </div>
       </template>
