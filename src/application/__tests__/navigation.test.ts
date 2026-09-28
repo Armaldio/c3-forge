@@ -66,6 +66,19 @@ describe('navigation history', () => {
     expect(canBack(history)).toBe(false)
   })
 
+  it('returns from opening a graph entity to the same focused graph entry', () => {
+    const focusedGraph = {
+      view: 'graph',
+      selectedEntityId: null,
+      graphFocusEntityId: 'object:sid:player',
+    } satisfies NavigationEntry
+    const openedEntity = overview('object:sid:player')
+    const history = pushNavigation(initNavigationHistory(focusedGraph), openedEntity)
+
+    expect(currentNavigationEntry(history)).toEqual(openedEntity)
+    expect(currentNavigationEntry(backNavigation(history))).toEqual(focusedGraph)
+  })
+
   it('truncates the forward branch when navigating after Back', () => {
     const player = overview('object:sid:player')
     const events = overview('eventSheet:sid:events')
