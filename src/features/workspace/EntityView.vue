@@ -15,6 +15,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   select: [id: string]
+  'navigate-project-root': []
 }>()
 
 interface RelationshipGroup {
@@ -41,10 +42,8 @@ const allIncomingReferences = computed(() => props.analysis.referencesByTarget.g
 const allOutgoingReferences = computed(() => props.analysis.referencesBySource.get(props.selectedEntityId) ?? [])
 const incomingReferences = computed(() => referencesByRole(allIncomingReferences.value, 'usage/dependency'))
 const outgoingReferences = computed(() => referencesByRole(allOutgoingReferences.value, 'usage/dependency'))
-const incomingStructureReferences = computed(() => allIncomingReferences.value.filter((reference) =>
-  relationshipPresentation(reference.relationship).role !== 'usage/dependency'))
-const outgoingStructureReferences = computed(() => allOutgoingReferences.value.filter((reference) =>
-  relationshipPresentation(reference.relationship).role !== 'usage/dependency'))
+const incomingStructureReferences = computed(() => referencesByRole(allIncomingReferences.value, 'structure/ownership'))
+const outgoingStructureReferences = computed(() => referencesByRole(allOutgoingReferences.value, 'structure/ownership'))
 const incomingGroups = computed(() => groupReferences(props.analysis, incomingReferences.value, 'sourceEntityId'))
 const outgoingGroups = computed(() => groupReferences(props.analysis, outgoingReferences.value, 'targetEntityId'))
 const incomingStructureGroups = computed(() => groupReferences(props.analysis, incomingStructureReferences.value, 'sourceEntityId'))
@@ -137,18 +136,26 @@ function exactLocation(reference: ProjectReference): string {
             Entity
           </p>
           <nav
-            v-if="eventSheetContext"
             class="entity-breadcrumb"
-            aria-label="Entity location"
+            aria-label="Project breadcrumb"
           >
-            <span>Event sheets</span>
-            <span aria-hidden="true">›</span>
             <button
               type="button"
-              @click="emit('select', eventSheetContext.id)"
+              @click="emit('navigate-project-root')"
             >
-              {{ eventSheetContext.name }}
+              Project
             </button>
+            <span aria-hidden="true">›</span>
+            <template v-if="eventSheetContext">
+              <button
+                type="button"
+                @click="emit('select', eventSheetContext.id)"
+              >
+                {{ eventSheetContext.name }}
+              </button>
+              <span aria-hidden="true">›</span>
+            </template>
+            <span aria-current="page">{{ entity.name || 'Unnamed entity' }}</span>
           </nav>
           <h1 id="entity-view-title">
             {{ entity.name || 'Unnamed entity' }}

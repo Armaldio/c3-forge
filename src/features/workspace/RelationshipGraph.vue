@@ -4,7 +4,6 @@ import type { ProjectAnalysis, RelationshipKind } from '../../core/types'
 import { entityKindLabel, defaultGraphRelationshipKinds, relationshipPresentation } from './presentation'
 import {
   buildGraphModel,
-  firstClassEntityCount,
   graphEntityKinds,
   graphFocusEntityId as suggestedGraphFocusEntityId,
   graphKindsWithSelection,
@@ -16,8 +15,7 @@ import {
 
 const props = defineProps<{
   analysis: ProjectAnalysis
-  selectedEntityId: string | null
-  graphFocusEntityId?: string | null
+  graphFocusEntityId: string | null
 }>()
 
 const emit = defineEmits<{
@@ -49,19 +47,18 @@ const entityFilters = reactive<Record<GraphEntityKind, boolean>>({
 const relationshipFilters = reactive<Record<RelationshipKind, boolean>>({
   ...Object.fromEntries(graphRelationshipKinds.map((kind) => [kind, defaultGraphRelationshipKinds.includes(kind)])),
 } as Record<RelationshipKind, boolean>)
-const graphMode = ref<GraphMode>(props.selectedEntityId || firstClassEntityCount(props.analysis) > 100 ? 'focus' : 'project')
+const graphMode = ref<GraphMode>('focus')
 const focusHops = ref<1 | 2>(1)
 const graphSelectedId = ref(props.graphFocusEntityId
-  ?? props.selectedEntityId
   ?? suggestedGraphFocusEntityId(props.analysis, DEFAULT_ENTITY_KINDS)
   ?? '')
-const graphSelectionExplicit = ref(Boolean(props.graphFocusEntityId ?? props.selectedEntityId))
+const graphSelectionExplicit = ref(Boolean(props.graphFocusEntityId))
 const zoom = ref(1)
 const pan = ref({ x: 0, y: 0 })
 const graphCanvas = ref<HTMLElement | null>(null)
 const dragOrigin = ref<{ pointerX: number; pointerY: number; panX: number; panY: number }>()
 
-const initiallySelectedEntity = props.analysis.index.byId.get(props.graphFocusEntityId ?? props.selectedEntityId ?? '')
+const initiallySelectedEntity = props.analysis.index.byId.get(props.graphFocusEntityId ?? '')
 if (initiallySelectedEntity && graphEntityKinds.includes(initiallySelectedEntity.kind as GraphEntityKind)) {
   entityFilters[initiallySelectedEntity.kind as GraphEntityKind] = true
 }
@@ -69,7 +66,7 @@ if (initiallySelectedEntity && graphEntityKinds.includes(initiallySelectedEntity
 const selectedKinds = computed(() => graphEntityKinds.filter((kind) => entityFilters[kind]))
 const selectedRelationships = computed(() => graphRelationshipKinds.filter((kind) => relationshipFilters[kind]))
 const focusEntityId = computed(() => {
-  const selected = graphSelectedId.value || props.selectedEntityId
+  const selected = graphSelectedId.value
   if (selected) return selected
   return suggestedGraphFocusEntityId(props.analysis, selectedKinds.value)
 })
@@ -100,25 +97,15 @@ const selectedEntityOutgoing = computed(() => selectedEntity.value
   : 0)
 const filterCount = computed(() => selectedKinds.value.length + selectedRelationships.value.length)
 
-watch(() => props.selectedEntityId, (entityId) => {
-  if (!entityId) return
-  graphSelectedId.value = entityId
-  graphSelectionExplicit.value = true
-  const entity = props.analysis.index.byId.get(entityId)
-  if (entity) enableSelectedKind(entity.kind)
-  graphMode.value = 'focus'
-})
-
 watch(() => props.graphFocusEntityId, (entityId) => {
   const restoredEntityId = entityId
-    ?? props.selectedEntityId
     ?? suggestedGraphFocusEntityId(props.analysis, selectedKinds.value)
     ?? ''
   graphSelectedId.value = restoredEntityId
-  graphSelectionExplicit.value = Boolean(entityId ?? props.selectedEntityId)
+  graphSelectionExplicit.value = Boolean(entityId)
   const entity = props.analysis.index.byId.get(restoredEntityId)
   if (entity) enableSelectedKind(entity.kind)
-  if (entityId || props.selectedEntityId) graphMode.value = 'focus'
+  graphMode.value = 'focus'
 })
 
 watch([graphMode, graphSelectedId, selectedKinds], () => {
@@ -129,11 +116,10 @@ watch([graphMode, graphSelectedId, selectedKinds], () => {
 
 watch(() => props.analysis, (analysis) => {
   graphSelectedId.value = props.graphFocusEntityId
-    ?? props.selectedEntityId
     ?? suggestedGraphFocusEntityId(analysis, DEFAULT_ENTITY_KINDS)
     ?? ''
-  graphSelectionExplicit.value = Boolean(props.graphFocusEntityId ?? props.selectedEntityId)
-  graphMode.value = props.graphFocusEntityId || props.selectedEntityId || firstClassEntityCount(analysis) > 100 ? 'focus' : 'project'
+  graphSelectionExplicit.value = Boolean(props.graphFocusEntityId)
+  graphMode.value = 'focus'
   zoom.value = 1
   pan.value = { x: 0, y: 0 }
 })

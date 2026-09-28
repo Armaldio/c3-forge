@@ -634,6 +634,10 @@ code {
   grid-template-columns: minmax(230px, 0.28fr) minmax(0, 1fr);
 }
 
+.workspace-layout--resources {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .explorer-pane {
   min-width: 0;
   overflow: auto;

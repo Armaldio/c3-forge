@@ -91,14 +91,14 @@ describe('relationship graph model', () => {
     expect(graphKindsWithSelection(entityKinds, 'projectFile')).toContain('projectFile')
   })
 
-  it('routes same-column dependency edges through separate deterministic lanes', () => {
-    const first = entity('function', 'First')
-    const second = entity('function', 'Second')
-    const third = entity('function', 'Third')
-    const fourth = entity('function', 'Fourth')
-    const model = buildGraphModel(analysis([first, second, third, fourth], [
-      dependency(first, second, 'function-call'),
-      dependency(third, fourth, 'function-call'),
+  it('reuses a same-column route lane for disjoint vertical spans', () => {
+    const alpha = entity('function', 'Alpha')
+    const bravo = entity('function', 'Bravo')
+    const charlie = entity('function', 'Charlie')
+    const delta = entity('function', 'Delta')
+    const model = buildGraphModel(analysis([alpha, bravo, charlie, delta], [
+      dependency(alpha, bravo, 'function-call'),
+      dependency(charlie, delta, 'function-call'),
     ]), {
       entityKinds: ['function'],
       relationships: ['function-call'],
@@ -107,7 +107,24 @@ describe('relationship graph model', () => {
     })
 
     expect(model.edges).toHaveLength(2)
-    expect(new Set(model.edges.map((edge) => edge.routeLane)).size).toBe(2)
+    expect(model.edges.map((edge) => edge.routeLane)).toEqual([0, 0])
+  })
+
+  it('allocates separate lanes for overlapping nested route spans', () => {
+    const functions = ['Alpha', 'Bravo', 'Charlie', 'Delta', 'Echo', 'Foxtrot']
+      .map((name) => entity('function', name))
+    const model = buildGraphModel(analysis(functions, [
+      dependency(functions[0]!, functions[5]!, 'function-call'),
+      dependency(functions[1]!, functions[4]!, 'function-call'),
+      dependency(functions[2]!, functions[3]!, 'function-call'),
+    ]), {
+      entityKinds: ['function'],
+      relationships: ['function-call'],
+      mode: 'project',
+      focusHops: 1,
+    })
+
+    expect(model.edges.map((edge) => edge.routeLane)).toEqual([0, 1, 2])
   })
 
   it('reserves a measured gutter before the adjacent node column for same-column routes and labels', () => {
@@ -131,15 +148,39 @@ describe('relationship graph model', () => {
 
     expect(model.edges).toHaveLength(6)
     expect(new Set(model.edges.filter((edge) => edge.source.kind === edge.target.kind)
-      .map((edge) => edge.routeLane))).toEqual(new Set([0, 1, 2, 3, 4]))
+      .map((edge) => edge.routeLane))).toEqual(new Set([0]))
     expect(functionColumn).toBeDefined()
     expect(variableColumn).toBeDefined()
     expect(sourceX).toBe(functionColumn?.x)
 
-    // The 220px label allowance, lane offset, and padding fit before the next column.
-    const longestLabelRight = sourceX! + 208 + 48 + 4 * 20 + 220 + 12
+    // Disjoint edges reuse lane 0; the gutter reserves one label lane and padding.
+    const longestLabelRight = sourceX! + 208 + 48 + 220 + 12
     expect(variableColumn!.x).toBeGreaterThanOrEqual(longestLabelRight)
-    expect(functionColumn!.gutter).toBeGreaterThan(88)
+    expect(functionColumn!.gutter).toBe(280)
+  })
+
+  it('reserves gutter width for the highest concurrently active lane', () => {
+    const functions = ['Alpha', 'Bravo', 'Charlie', 'Delta', 'Echo', 'Foxtrot']
+      .map((name) => entity('function', name))
+    const score = entity('variable', 'Score')
+    const model = buildGraphModel(analysis([...functions, score], [
+      dependency(functions[0]!, functions[5]!, 'function-call'),
+      dependency(functions[1]!, functions[4]!, 'function-call'),
+      dependency(functions[2]!, functions[3]!, 'function-call'),
+      dependency(functions[0]!, score, 'event-variable-reference'),
+    ]), {
+      entityKinds: ['function', 'variable'],
+      relationships: ['function-call', 'event-variable-reference'],
+      mode: 'project',
+      focusHops: 1,
+    })
+    const functionColumn = model.columns.find((column) => column.rank === 2)
+    const variableColumn = model.columns.find((column) => column.rank === 3)
+
+    expect(model.edges.filter((edge) => edge.source.kind === edge.target.kind)
+      .map((edge) => edge.routeLane)).toEqual([0, 1, 2])
+    expect(functionColumn?.gutter).toBe(320)
+    expect(variableColumn?.x).toBeGreaterThanOrEqual(functionColumn!.x + 208 + 48 + 2 * 20 + 220 + 12)
   })
 
   it('limits focus mode to the selected one-hop or two-hop neighborhood', () => {

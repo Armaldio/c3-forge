@@ -32,7 +32,7 @@ type ResourcePathMatch =
   | { readonly status: 'missing' }
   | { readonly status: 'ambiguous'; readonly paths: readonly string[] };
 
-/** Construct resource paths are case-insensitive; retain exact paths when available and reject collisions. */
+/** Prefer an exact manifest path; accept one unique case-insensitive match and reject ambiguous matches. */
 async function resolveCaseInsensitiveResourcePath(
   filesystem: ProjectFileSystem,
   requestedPath: string,

@@ -1,19 +1,10 @@
 <script setup lang="ts">
-import { computed, onUnmounted, ref } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 import type { ProjectFileSystem } from '../../core/filesystem'
-import type { ForgeEntity, ProjectAnalysis } from '../../core/types'
+import type { ProjectAnalysis } from '../../core/types'
+import { buildProjectResourceItems, isTextResource, RESOURCE_GROUPS, type ProjectResourceItem } from './resource-model'
 
-type ResourceGroup = 'Images' | 'Audio' | 'Fonts' | 'Videos' | 'Project files' | 'Add-ons'
 type PreviewKind = 'image' | 'audio' | 'video' | 'text' | 'metadata'
-
-interface ResourceItem {
-  readonly id: string
-  readonly name: string
-  readonly path: string
-  readonly group: ResourceGroup
-  readonly type: string
-  readonly entity?: ForgeEntity
-}
 
 interface PreviewState {
   readonly kind: PreviewKind
@@ -26,10 +17,13 @@ interface PreviewState {
 const props = defineProps<{
   analysis: ProjectAnalysis
   filesystem: ProjectFileSystem
-  active: boolean
+  resourcePath: string | null
 }>()
 
-const groups: readonly ResourceGroup[] = ['Images', 'Audio', 'Fonts', 'Videos', 'Project files', 'Add-ons']
+const emit = defineEmits<{
+  'select-resource': [path: string]
+}>()
+
 const query = ref('')
 const selectedId = ref<string | null>(null)
 const preview = ref<PreviewState | null>(null)
@@ -39,39 +33,7 @@ const failure = ref<string | null>(null)
 let requestId = 0
 let previewUrl: string | null = null
 
-const items = computed<readonly ResourceItem[]>(() => {
-  if (!props.active) return []
-  const assets = props.analysis.index.byKind.get('asset') ?? []
-  const resources: ResourceItem[] = assets.map((entity) => {
-    const extension = extensionOf(entity.sourcePath)
-    return {
-      id: `file:${entity.sourcePath}`,
-      name: entity.name || basename(entity.sourcePath),
-      path: entity.sourcePath,
-      group: groupForExtension(extension),
-      type: String(entity.metadata.type ?? entity.metadata.extension ?? (extension.toUpperCase() || 'File')),
-      entity,
-    }
-  })
-  resources.push({
-    id: 'file:project.c3proj',
-    name: 'project.c3proj',
-    path: 'project.c3proj',
-    group: 'Project files',
-    type: 'C3 project',
-  })
-  for (const addon of props.analysis.index.byKind.get('addon') ?? []) {
-    resources.push({
-      id: `addon:${addon.id}`,
-      name: addon.name,
-      path: addon.sourcePath,
-      group: 'Add-ons',
-      type: String(addon.metadata.version ?? addon.metadata.pluginId ?? 'Add-on'),
-      entity: addon,
-    })
-  }
-  return resources
-})
+const items = computed(() => buildProjectResourceItems(props.analysis))
 
 const filteredItems = computed(() => {
   const needle = query.value.trim().toLocaleLowerCase()
@@ -79,36 +41,25 @@ const filteredItems = computed(() => {
   return items.value.filter((item) => `${item.name} ${item.path} ${item.type} ${item.group}`.toLocaleLowerCase().includes(needle))
 })
 
-const visibleGroups = computed(() => groups.filter((group) => filteredItems.value.some((item) => item.group === group)))
-const selectedItem = computed(() => items.value.find((item) => item.id === selectedId.value) ?? null)
+const visibleGroups = computed(() => RESOURCE_GROUPS.filter((group) => filteredItems.value.some((item) => item.group === group)))
+const selectedItem = computed(() => items.value.find((item) => item.navigationPath === selectedId.value) ?? null)
 
 function extensionOf(path: string): string {
-  const name = basename(path)
+  const name = path.split('/').at(-1) ?? path
   const separator = name.lastIndexOf('.')
   return separator >= 0 ? name.slice(separator + 1).toLowerCase() : ''
 }
 
-function basename(path: string): string {
-  return path.split('/').at(-1) ?? path
-}
-
-function groupForExtension(extension: string): ResourceGroup {
-  if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'avif'].includes(extension)) return 'Images'
-  if (['mp3', 'wav', 'ogg', 'oga', 'm4a', 'aac', 'flac', 'opus'].includes(extension)) return 'Audio'
-  if (['mp4', 'webm', 'mov', 'm4v', 'ogv', 'avi', 'mkv'].includes(extension)) return 'Videos'
-  if (['ttf', 'otf', 'woff', 'woff2'].includes(extension)) return 'Fonts'
-  return 'Project files'
-}
-
-function previewKind(item: ResourceItem): PreviewKind {
+function previewKind(item: ProjectResourceItem): PreviewKind {
   if (item.group === 'Images') return 'image'
   if (item.group === 'Audio') return 'audio'
   if (item.group === 'Videos') return 'video'
-  if (item.group === 'Project files' && ['txt', 'json', 'xml', 'csv', 'md', 'js', 'ts', 'css', 'html', 'yaml', 'yml', 'c3proj'].includes(extensionOf(item.path))) return 'text'
+  if (item.group === 'Add-ons') return 'text'
+  if (isTextResource(item)) return 'text'
   return 'metadata'
 }
 
-function contentType(item: ResourceItem, kind: PreviewKind): string {
+function contentType(item: ProjectResourceItem, kind: PreviewKind): string {
   const extension = extensionOf(item.path)
   if (kind === 'image') return ({ jpg: 'image/jpeg', jpeg: 'image/jpeg', svg: 'image/svg+xml' } as Record<string, string>)[extension] ?? `image/${extension}`
   if (kind === 'audio') return ({ mp3: 'audio/mpeg', m4a: 'audio/mp4', oga: 'audio/ogg' } as Record<string, string>)[extension] ?? `audio/${extension}`
@@ -128,21 +79,30 @@ function revokePreviewUrl(): void {
   previewUrl = null
 }
 
-async function selectItem(item: ResourceItem): Promise<void> {
-  selectedId.value = item.id
+function requestItem(item: ProjectResourceItem): void {
+  emit('select-resource', item.navigationPath)
+}
+
+watch(() => props.resourcePath, (path) => {
+  const item = items.value.find((candidate) => candidate.navigationPath === path)
+  selectedId.value = item?.navigationPath ?? null
   imageDimensions.value = null
   failure.value = null
   preview.value = null
   loading.value = false
   revokePreviewUrl()
+  if (item) void loadItem(item)
+  else requestId += 1
+}, { immediate: true })
+
+async function loadItem(item: ProjectResourceItem): Promise<void> {
   const activeRequest = ++requestId
   const kind = previewKind(item)
+  if (item.group === 'Add-ons') {
+    preview.value = { kind: 'text', text: JSON.stringify(item.metadata ?? {}, null, 2) }
+    return
+  }
   if (kind === 'metadata') {
-    if (item.group === 'Add-ons') {
-      preview.value = { kind, message: 'Add-on metadata' }
-      return
-    }
-
     loading.value = true
     try {
       const info = props.filesystem.stat ? await props.filesystem.stat(item.path) : undefined
@@ -210,7 +170,7 @@ onUnmounted(() => {
       <div class="resource-list-header">
         <div>
           <p class="resource-eyebrow">
-            Project files
+            Global project view
           </p>
           <h2>Resources</h2>
         </div>
@@ -242,14 +202,14 @@ onUnmounted(() => {
           <ul>
             <li
               v-for="item in filteredItems.filter((resource) => resource.group === group)"
-              :key="item.id"
+              :key="item.navigationPath"
             >
               <button
                 class="resource-row"
-                :class="{ 'is-selected': selectedId === item.id }"
+                :class="{ 'is-selected': selectedId === item.navigationPath }"
                 type="button"
-                :aria-pressed="selectedId === item.id"
-                @click="selectItem(item)"
+                :aria-pressed="selectedId === item.navigationPath"
+                @click="requestItem(item)"
               >
                 <span class="resource-row-copy"><strong>{{ item.name }}</strong><small>{{ item.path }}</small></span>
                 <span class="resource-type">{{ item.type }}</span>

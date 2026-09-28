@@ -15,7 +15,6 @@ import { loadStageLabel, summarizeProjectDiagnostics, workspaceNavigationTitle }
 const props = defineProps<{
   analysis: ProjectAnalysis | null
   filesystem: ProjectFileSystem | null
-  selectedEntityId: string | null
   navigationEntry: NavigationEntry
   canNavigateBack: boolean
   canNavigateForward: boolean
@@ -32,6 +31,7 @@ const emit = defineEmits<{
   'open-archive': [file: File]
   'update:searchQuery': [value: string]
   'select-entity': [id: string]
+  'select-resource': [path: string]
   'navigate-view': [view: NavigationView]
   'navigate-back': []
   'navigate-forward': []
@@ -46,13 +46,18 @@ const diagnosticsToggle = ref<HTMLButtonElement | null>(null)
 const explorer = ref<{ revealKind: (kind: EntityKind) => Promise<void> } | null>(null)
 const diagnosticsOpen = ref(false)
 const activeWorkspaceView = computed(() => props.navigationEntry.view)
-const explorerSelectedEntityId = computed(() => activeWorkspaceView.value === 'graph'
-  ? props.navigationEntry.graphFocusEntityId ?? props.selectedEntityId
-  : props.selectedEntityId)
+const projectEntityId = computed(() => props.navigationEntry.view === 'project' ? props.navigationEntry.entityId : null)
+const graphFocusEntityId = computed(() => props.navigationEntry.view === 'graph' ? props.navigationEntry.focusEntityId : null)
+const resourcePath = computed(() => props.navigationEntry.view === 'resources' ? props.navigationEntry.resourcePath : null)
+const explorerSelectedEntityId = computed(() => {
+  if (props.navigationEntry.view === 'project') return props.navigationEntry.entityId
+  if (props.navigationEntry.view === 'graph') return props.navigationEntry.focusEntityId
+  return null
+})
 const navigationTitle = computed(() => {
-  const focusId = activeWorkspaceView.value === 'graph'
-    ? props.navigationEntry.graphFocusEntityId ?? props.selectedEntityId
-    : activeWorkspaceView.value === 'overview' ? props.selectedEntityId : null
+  const focusId = props.navigationEntry.view === 'project'
+    ? props.navigationEntry.entityId
+    : props.navigationEntry.view === 'graph' ? props.navigationEntry.focusEntityId : null
   const entity = focusId ? props.analysis?.index.byId.get(focusId) : undefined
   return workspaceNavigationTitle(activeWorkspaceView.value, entity?.name)
 })
@@ -254,9 +259,11 @@ function handleArchiveSelection(event: Event): void {
       <template v-if="analysis">
         <section
           class="workspace-layout"
+          :class="{ 'workspace-layout--resources': activeWorkspaceView === 'resources' }"
           aria-label="Project workspace"
         >
           <EntityExplorer
+            v-if="activeWorkspaceView !== 'resources'"
             ref="explorer"
             :analysis="analysis"
             :selected-entity-id="explorerSelectedEntityId"
@@ -293,14 +300,14 @@ function handleArchiveSelection(event: Event): void {
                 aria-label="Project views"
               >
                 <button
-                  id="workspace-tab-overview"
+                  id="workspace-tab-project"
                   type="button"
                   role="tab"
-                  :aria-selected="activeWorkspaceView === 'overview'"
-                  aria-controls="workspace-panel-overview"
-                  @click="selectView('overview')"
+                  :aria-selected="activeWorkspaceView === 'project'"
+                  aria-controls="workspace-panel-project"
+                  @click="selectView('project')"
                 >
-                  Overview
+                  Project
                 </button>
                 <button
                   id="workspace-tab-graph"
@@ -328,14 +335,14 @@ function handleArchiveSelection(event: Event): void {
               </h1>
             </div>
             <section
-              v-show="activeWorkspaceView === 'overview'"
-              id="workspace-panel-overview"
+              v-show="activeWorkspaceView === 'project'"
+              id="workspace-panel-project"
               class="workspace-view-panel"
               role="tabpanel"
-              aria-labelledby="workspace-tab-overview"
+              aria-labelledby="workspace-tab-project"
             >
               <ProjectOverview
-                v-if="!selectedEntityId"
+                v-if="!projectEntityId"
                 :analysis="analysis"
                 @explore-kind="revealExplorerKind"
                 @navigate-view="selectView"
@@ -343,8 +350,9 @@ function handleArchiveSelection(event: Event): void {
               <EntityView
                 v-else
                 :analysis="analysis"
-                :selected-entity-id="selectedEntityId"
+                :selected-entity-id="projectEntityId"
                 @select="emit('select-entity', $event)"
+                @navigate-project-root="selectView('project')"
               />
             </section>
             <section
@@ -356,8 +364,7 @@ function handleArchiveSelection(event: Event): void {
             >
               <RelationshipGraph
                 :analysis="analysis"
-                :selected-entity-id="selectedEntityId"
-                :graph-focus-entity-id="navigationEntry.graphFocusEntityId"
+                :graph-focus-entity-id="graphFocusEntityId"
                 @open-entity="openGraphEntity"
                 @update:graph-focus-entity-id="emit('graph-focus-change', $event)"
               />
@@ -373,7 +380,8 @@ function handleArchiveSelection(event: Event): void {
                 v-if="activeWorkspaceView === 'resources' && analysis && filesystem"
                 :analysis="analysis"
                 :filesystem="filesystem"
-                :active="true"
+                :resource-path="resourcePath"
+                @select-resource="emit('select-resource', $event)"
               />
             </section>
           </div>

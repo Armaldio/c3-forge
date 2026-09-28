@@ -23,13 +23,13 @@ describe('workspaceNavigationTitle', () => {
     expect(workspaceNavigationTitle('resources', 'Event sheet 1')).toBe('Project resources')
   })
 
-  it('uses the selected entity title in Overview and the graph focus title in Graph', () => {
-    expect(workspaceNavigationTitle('overview', 'Player')).toBe('Player')
+  it('uses the selected entity title in Project and the graph focus title in Graph', () => {
+    expect(workspaceNavigationTitle('project', 'Player')).toBe('Player')
     expect(workspaceNavigationTitle('graph', 'SpawnEnemy')).toBe('SpawnEnemy')
   })
 
   it('uses each workspace label when no entity is selected', () => {
-    expect(workspaceNavigationTitle('overview')).toBe('Project overview')
+    expect(workspaceNavigationTitle('project')).toBe('Project overview')
     expect(workspaceNavigationTitle('graph')).toBe('Relationship graph')
   })
 })

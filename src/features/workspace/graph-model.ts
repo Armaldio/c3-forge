@@ -104,6 +104,12 @@ const ROUTE_LABEL_START = 48
 const ROUTE_LABEL_MAX_WIDTH = 220
 const ROUTE_LABEL_PADDING = 12
 const ROUTE_LANE_GAP = 20
+const ROUTE_VERTICAL_CLEARANCE = 16
+
+interface RouteSpan {
+  readonly top: number
+  readonly bottom: number
+}
 
 export function buildGraphModel(analysis: ProjectAnalysis, options: GraphModelOptions): GraphModel {
   const allowedKinds = new Set(options.entityKinds)
@@ -175,21 +181,52 @@ export function buildGraphModel(analysis: ProjectAnalysis, options: GraphModelOp
     .sort((left, right) => left.source.name.localeCompare(right.source.name)
       || left.target.name.localeCompare(right.target.name)
       || left.dependency.relationship.localeCompare(right.dependency.relationship))
-  const sameColumnCounts = new Map<number, number>()
-  for (const edge of includedEdges) {
-    const sourceRank = ranksById.get(edge.source.id)
-    if (sourceRank === undefined || sourceRank !== ranksById.get(edge.target.id)) continue
-    sameColumnCounts.set(sourceRank, (sameColumnCounts.get(sourceRank) ?? 0) + 1)
+  const rowByEntityId = new Map<string, number>()
+  for (const lane of lanes.values()) {
+    lane.forEach((entity, row) => rowByEntityId.set(entity.id, row))
+  }
+  const routeLanesByRank = new Map<number, RouteSpan[][]>()
+  const routeLaneByEdge = new Map<typeof includedEdges[number], number>()
+  const sameColumnEdges = includedEdges.flatMap((edge, index) => {
+    const rank = ranksById.get(edge.source.id)
+    if (rank === undefined || rank !== ranksById.get(edge.target.id)) return []
+    const sourceRow = rowByEntityId.get(edge.source.id)
+    const targetRow = rowByEntityId.get(edge.target.id)
+    if (sourceRow === undefined || targetRow === undefined) return []
+    const sourceY = PADDING + sourceRow * (NODE_HEIGHT + ROW_GAP)
+    const targetY = PADDING + targetRow * (NODE_HEIGHT + ROW_GAP)
+    const span = sourceRow === targetRow
+      ? { top: sourceY, bottom: sourceY + NODE_HEIGHT }
+      : sourceRow < targetRow
+        ? { top: sourceY + NODE_HEIGHT, bottom: targetY }
+        : { top: targetY + NODE_HEIGHT, bottom: sourceY }
+    return [{ edge, index, rank, span }]
+  }).sort((left, right) => left.span.top - right.span.top
+    || left.span.bottom - right.span.bottom
+    || left.index - right.index)
+
+  for (const { edge, rank, span } of sameColumnEdges) {
+    const lanesForRank = routeLanesByRank.get(rank) ?? []
+    let routeLane = lanesForRank.findIndex((laneSpans) => laneSpans.every((other) =>
+      span.bottom + ROUTE_VERTICAL_CLEARANCE < other.top
+        || other.bottom + ROUTE_VERTICAL_CLEARANCE < span.top));
+    if (routeLane === -1) {
+      routeLane = lanesForRank.length
+      lanesForRank.push([])
+      routeLanesByRank.set(rank, lanesForRank)
+    }
+    lanesForRank[routeLane]!.push(span)
+    routeLaneByEdge.set(edge, routeLane)
   }
 
   const columns: GraphColumn[] = []
   let nextColumnX = PADDING
   for (const rank of [...lanes.keys()].sort((left, right) => left - right)) {
-    const sameColumnEdges = sameColumnCounts.get(rank) ?? 0
-    const gutter = sameColumnEdges > 0
+    const activeRouteLanes = routeLanesByRank.get(rank)?.length ?? 0
+    const gutter = activeRouteLanes > 0
       ? Math.max(
         COLUMN_GAP,
-        ROUTE_LABEL_START + (sameColumnEdges - 1) * ROUTE_LANE_GAP
+        ROUTE_LABEL_START + (activeRouteLanes - 1) * ROUTE_LANE_GAP
           + ROUTE_LABEL_MAX_WIDTH + ROUTE_LABEL_PADDING,
       )
       : COLUMN_GAP
@@ -207,13 +244,8 @@ export function buildGraphModel(analysis: ProjectAnalysis, options: GraphModelOp
     }))
   }
 
-  const sameColumnRouteLanes = new Map<number, number>()
   const edgesWithLanes = includedEdges.map((edge) => {
-    const sourceRank = ranksById.get(edge.source.id)
-    if (sourceRank === undefined || sourceRank !== ranksById.get(edge.target.id)) return { ...edge, routeLane: 0 }
-    const routeLane = sameColumnRouteLanes.get(sourceRank) ?? 0
-    sameColumnRouteLanes.set(sourceRank, routeLane + 1)
-    return { ...edge, routeLane }
+    return { ...edge, routeLane: routeLaneByEdge.get(edge) ?? 0 }
   })
   const incomingCounts = new Map<string, number>()
   const outgoingCounts = new Map<string, number>()

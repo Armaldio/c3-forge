@@ -1,10 +1,9 @@
-export type NavigationView = 'overview' | 'graph' | 'resources'
+export type NavigationEntry =
+  | { readonly view: 'project'; readonly entityId: string | null }
+  | { readonly view: 'graph'; readonly focusEntityId: string | null }
+  | { readonly view: 'resources'; readonly resourcePath: string | null }
 
-export interface NavigationEntry {
-  readonly view: NavigationView
-  readonly selectedEntityId: string | null
-  readonly graphFocusEntityId?: string | null
-}
+export type NavigationView = NavigationEntry['view']
 
 export interface NavigationHistory {
   readonly entries: readonly NavigationEntry[]
@@ -23,12 +22,15 @@ export function pushNavigation(history: NavigationHistory, entry: NavigationEntr
   return { entries, index: entries.length - 1 }
 }
 
-export function replaceCurrentNavigation(history: NavigationHistory, entry: NavigationEntry): NavigationHistory {
-  if (sameEntry(currentNavigationEntry(history), entry)) return history
-
-  const entries = history.entries.slice()
-  entries[history.index] = copyEntry(entry)
-  return { entries, index: history.index }
+export function navigationEntryForView(current: NavigationEntry, view: NavigationView): NavigationEntry {
+  if (view === 'project') return { view: 'project', entityId: null }
+  if (view === 'resources') return { view: 'resources', resourcePath: null }
+  return {
+    view: 'graph',
+    focusEntityId: current.view === 'graph'
+      ? current.focusEntityId
+      : current.view === 'project' ? current.entityId : null,
+  }
 }
 
 export function backNavigation(history: NavigationHistory): NavigationHistory {
@@ -56,7 +58,13 @@ function copyEntry(entry: NavigationEntry): NavigationEntry {
 }
 
 function sameEntry(left: NavigationEntry, right: NavigationEntry): boolean {
-  return left.view === right.view
-    && left.selectedEntityId === right.selectedEntityId
-    && (left.graphFocusEntityId ?? null) === (right.graphFocusEntityId ?? null)
+  if (left.view !== right.view) return false
+  switch (left.view) {
+    case 'project':
+      return right.view === 'project' && left.entityId === right.entityId
+    case 'graph':
+      return right.view === 'graph' && left.focusEntityId === right.focusEntityId
+    case 'resources':
+      return right.view === 'resources' && left.resourcePath === right.resourcePath
+  }
 }
