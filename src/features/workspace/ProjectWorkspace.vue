@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import type { EntityKind, ForgeEntity, ProjectAnalysis, ProjectLoadStage } from '../../core/types'
 import type { ProjectFileSystem } from '../../core/filesystem'
 import type { NavigationEntry, NavigationView } from '../../application/navigation'
@@ -46,6 +46,9 @@ const diagnosticsToggle = ref<HTMLButtonElement | null>(null)
 const explorer = ref<{ revealKind: (kind: EntityKind) => Promise<void> } | null>(null)
 const diagnosticsOpen = ref(false)
 const activeWorkspaceView = computed(() => props.navigationEntry.view)
+const explorerSelectedEntityId = computed(() => activeWorkspaceView.value === 'graph'
+  ? props.navigationEntry.graphFocusEntityId ?? props.selectedEntityId
+  : props.selectedEntityId)
 const navigationTitle = computed(() => {
   const focusId = activeWorkspaceView.value === 'graph'
     ? props.navigationEntry.graphFocusEntityId ?? props.selectedEntityId
@@ -54,6 +57,9 @@ const navigationTitle = computed(() => {
   return entity?.name ?? ({ overview: 'Project overview', graph: 'Relationship graph', resources: 'Project resources' }[activeWorkspaceView.value])
 })
 const diagnosticSummary = computed(() => summarizeProjectDiagnostics(props.analysis?.diagnostics ?? []))
+watch(() => diagnosticSummary.value.total, (total) => {
+  if (total === 0) diagnosticsOpen.value = false
+})
 const diagnosticMark = computed(() => {
   if (diagnosticSummary.value.state === 'clear') return '✓'
   if (diagnosticSummary.value.state === 'info') return 'i'
@@ -253,7 +259,7 @@ function handleArchiveSelection(event: Event): void {
           <EntityExplorer
             ref="explorer"
             :analysis="analysis"
-            :selected-entity-id="selectedEntityId"
+            :selected-entity-id="explorerSelectedEntityId"
             @select="emit('select-entity', $event)"
           />
           <div class="main-column">
@@ -357,14 +363,14 @@ function handleArchiveSelection(event: Event): void {
               />
             </section>
             <section
-              v-if="activeWorkspaceView === 'resources'"
+              v-show="activeWorkspaceView === 'resources'"
               id="workspace-panel-resources"
               class="workspace-view-panel"
               role="tabpanel"
               aria-labelledby="workspace-tab-resources"
             >
               <ResourcesView
-                v-if="analysis && filesystem"
+                v-if="activeWorkspaceView === 'resources' && analysis && filesystem"
                 :analysis="analysis"
                 :filesystem="filesystem"
                 :active="true"
@@ -383,6 +389,7 @@ function handleArchiveSelection(event: Event): void {
             {{ diagnosticSummary.label }}
           </p>
           <button
+            v-if="diagnosticSummary.total > 0"
             ref="diagnosticsToggle"
             class="diagnostics-toggle"
             type="button"
@@ -395,6 +402,7 @@ function handleArchiveSelection(event: Event): void {
         </div>
 
         <div
+          v-if="diagnosticSummary.total > 0"
           v-show="diagnosticsOpen"
           id="diagnostics-drawer"
           :inert="!diagnosticsOpen"

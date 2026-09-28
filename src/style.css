@@ -1130,6 +1130,28 @@ code {
   border-bottom: 1px solid var(--line);
 }
 
+.entity-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: -2px 0 5px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.entity-breadcrumb button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+
+.entity-breadcrumb button:hover {
+  text-decoration: underline;
+}
+
 .entity-view-title-block h1 {
   max-width: 100%;
   overflow-wrap: anywhere;

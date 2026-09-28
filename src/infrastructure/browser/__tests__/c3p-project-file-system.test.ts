@@ -106,4 +106,16 @@ describe('C3P archive project filesystem', () => {
     expect(new TextDecoder().decode(await filesystem.readBinary('images/selected.png'))).toBe('selected image bytes')
     await expect(filesystem.readBinary('images/broken.png')).rejects.toThrow()
   })
+
+  it('keeps the selected archive bytes unchanged when reading a resource for preview', async () => {
+    const bytes = archive({
+      'project.c3proj': '{"name":"Read only preview"}',
+      'images/icon.png': 'preview image bytes',
+    })
+    const original = bytes.slice()
+    const filesystem = await createC3pProjectFileSystem('read-only.c3p', bytes)
+
+    expect(new TextDecoder().decode(await filesystem.readBinary('images/icon.png'))).toBe('preview image bytes')
+    expect(bytes).toEqual(original)
+  })
 })

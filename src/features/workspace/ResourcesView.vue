@@ -138,7 +138,22 @@ async function selectItem(item: ResourceItem): Promise<void> {
   const activeRequest = ++requestId
   const kind = previewKind(item)
   if (kind === 'metadata') {
-    preview.value = { kind, message: item.group === 'Add-ons' ? 'Add-on metadata' : 'Preview is not available for this file type.' }
+    if (item.group === 'Add-ons') {
+      preview.value = { kind, message: 'Add-on metadata' }
+      return
+    }
+
+    loading.value = true
+    try {
+      const info = props.filesystem.stat ? await props.filesystem.stat(item.path) : undefined
+      if (activeRequest === requestId) {
+        preview.value = { kind, size: info?.size, message: 'Preview is not available for this file type.' }
+      }
+    } catch (error) {
+      if (activeRequest === requestId) failure.value = error instanceof Error ? error.message : 'Could not read this project file.'
+    } finally {
+      if (activeRequest === requestId) loading.value = false
+    }
     return
   }
 

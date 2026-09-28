@@ -31,6 +31,12 @@ interface RelatedEntityGroup {
 }
 
 const entity = computed(() => props.analysis.index.byId.get(props.selectedEntityId))
+const eventSheetContext = computed(() => {
+  if (entity.value?.kind !== 'function') return null
+  const eventSheets = (props.analysis.index.bySourcePath.get(entity.value.sourcePath) ?? [])
+    .filter((candidate) => candidate.kind === 'eventSheet')
+  return eventSheets.length === 1 ? eventSheets[0] : null
+})
 const allIncomingReferences = computed(() => props.analysis.referencesByTarget.get(props.selectedEntityId) ?? [])
 const allOutgoingReferences = computed(() => props.analysis.referencesBySource.get(props.selectedEntityId) ?? [])
 const incomingReferences = computed(() => referencesByRole(allIncomingReferences.value, 'usage/dependency'))
@@ -130,6 +136,20 @@ function exactLocation(reference: ProjectReference): string {
           <p class="eyebrow">
             Entity
           </p>
+          <nav
+            v-if="eventSheetContext"
+            class="entity-breadcrumb"
+            aria-label="Entity location"
+          >
+            <span>Event sheets</span>
+            <span aria-hidden="true">›</span>
+            <button
+              type="button"
+              @click="emit('select', eventSheetContext.id)"
+            >
+              {{ eventSheetContext.name }}
+            </button>
+          </nav>
           <h1 id="entity-view-title">
             {{ entity.name || 'Unnamed entity' }}
           </h1>
