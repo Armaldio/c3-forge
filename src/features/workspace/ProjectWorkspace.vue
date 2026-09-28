@@ -10,7 +10,7 @@ import ProjectDiagnostics from './ProjectDiagnostics.vue'
 import ProjectOverview from './ProjectOverview.vue'
 import RelationshipGraph from './RelationshipGraph.vue'
 import ResourcesView from './ResourcesView.vue'
-import { loadStageLabel, summarizeProjectDiagnostics } from './presentation'
+import { loadStageLabel, summarizeProjectDiagnostics, workspaceNavigationTitle } from './presentation'
 
 const props = defineProps<{
   analysis: ProjectAnalysis | null
@@ -52,9 +52,9 @@ const explorerSelectedEntityId = computed(() => activeWorkspaceView.value === 'g
 const navigationTitle = computed(() => {
   const focusId = activeWorkspaceView.value === 'graph'
     ? props.navigationEntry.graphFocusEntityId ?? props.selectedEntityId
-    : props.selectedEntityId
+    : activeWorkspaceView.value === 'overview' ? props.selectedEntityId : null
   const entity = focusId ? props.analysis?.index.byId.get(focusId) : undefined
-  return entity?.name ?? ({ overview: 'Project overview', graph: 'Relationship graph', resources: 'Project resources' }[activeWorkspaceView.value])
+  return workspaceNavigationTitle(activeWorkspaceView.value, entity?.name)
 })
 const diagnosticSummary = computed(() => summarizeProjectDiagnostics(props.analysis?.diagnostics ?? []))
 watch(() => diagnosticSummary.value.total, (total) => {

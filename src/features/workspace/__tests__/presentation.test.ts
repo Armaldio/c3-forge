@@ -6,6 +6,7 @@ import {
   referencesByRole,
   RELATIONSHIP_PRESENTATION,
   summarizeProjectDiagnostics,
+  workspaceNavigationTitle,
 } from '../presentation'
 
 function diagnostic(severity: ProjectDiagnostic['severity']): ProjectDiagnostic {
@@ -16,6 +17,22 @@ function diagnostic(severity: ProjectDiagnostic['severity']): ProjectDiagnostic 
     description: 'A test diagnostic',
   }
 }
+
+describe('workspaceNavigationTitle', () => {
+  it('shows the resource view title even when an entity remains selected', () => {
+    expect(workspaceNavigationTitle('resources', 'Event sheet 1')).toBe('Project resources')
+  })
+
+  it('uses the selected entity title in Overview and the graph focus title in Graph', () => {
+    expect(workspaceNavigationTitle('overview', 'Player')).toBe('Player')
+    expect(workspaceNavigationTitle('graph', 'SpawnEnemy')).toBe('SpawnEnemy')
+  })
+
+  it('uses each workspace label when no entity is selected', () => {
+    expect(workspaceNavigationTitle('overview')).toBe('Project overview')
+    expect(workspaceNavigationTitle('graph')).toBe('Relationship graph')
+  })
+})
 
 describe('summarizeProjectDiagnostics', () => {
   it('reports a clear state when the project has no diagnostics', () => {
