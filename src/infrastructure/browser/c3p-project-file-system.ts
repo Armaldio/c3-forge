@@ -1,4 +1,4 @@
-import { unzip } from 'fflate'
+import { unzipSync } from 'fflate'
 import type { ProjectFileSystem } from '../../core/filesystem'
 import {
   joinProjectPaths,
@@ -14,11 +14,17 @@ const MAX_ARCHIVE_ENTRIES = 100_000
 /** Read-only, in-memory view of a .c3p ZIP archive. */
 export class C3pProjectFileSystem implements ProjectFileSystem {
   readonly rootName: string
-  readonly #files: ReadonlyMap<string, Uint8Array>
+  readonly #archive: Uint8Array
+  readonly #files: ReadonlyMap<string, { readonly archivePath: string; readonly size: number }>
   readonly #directories: ReadonlySet<string>
 
-  constructor(rootName: string, files: ReadonlyMap<string, Uint8Array>) {
+  constructor(
+    rootName: string,
+    archive: Uint8Array,
+    files: ReadonlyMap<string, { readonly archivePath: string; readonly size: number }>,
+  ) {
     this.rootName = rootName
+    this.#archive = archive
     this.#files = files
     const directories = new Set<string>([''])
     for (const path of files.keys()) {
@@ -46,16 +52,23 @@ export class C3pProjectFileSystem implements ProjectFileSystem {
     return this.#files.has(normalized) || this.#directories.has(normalized)
   }
 
+  async stat(path: string): Promise<{ readonly size: number }> {
+    const file = this.#files.get(this.normalizePath(path))
+    if (!file) throw new Error(`Project file was not found in the selected .c3p archive: ${path}`)
+    return { size: file.size }
+  }
+
   async readText(path: string): Promise<string> {
-    const bytes = this.#files.get(this.normalizePath(path))
-    if (!bytes) throw new Error(`Project file was not found in the selected .c3p archive: ${path}`)
-    return new TextDecoder().decode(bytes)
+    return new TextDecoder().decode(await this.readBinary(path))
   }
 
   async readBinary(path: string): Promise<Uint8Array> {
-    const bytes = this.#files.get(this.normalizePath(path))
-    if (!bytes) throw new Error(`Project file was not found in the selected .c3p archive: ${path}`)
-    return bytes.slice()
+    const file = this.#files.get(this.normalizePath(path))
+    if (!file) throw new Error(`Project file was not found in the selected .c3p archive: ${path}`)
+    const extracted = unzipSync(this.#archive, { filter: (entry) => entry.name === file.archivePath })
+    const bytes = extracted[file.archivePath]
+    if (!bytes) throw new Error(`Project file could not be decoded from the selected .c3p archive: ${path}`)
+    return bytes
   }
 
   async listFiles(directory = ''): Promise<readonly string[]> {
@@ -73,65 +86,57 @@ export class C3pProjectFileSystem implements ProjectFileSystem {
   }
 }
 
-/** Decode and validate a .c3p archive without extracting it to disk. */
+/** Index and validate a .c3p archive without inflating its entries or extracting to disk. */
 export async function createC3pProjectFileSystem(fileName: string, archive: Uint8Array): Promise<C3pProjectFileSystem> {
   if (archive.byteLength > MAX_ARCHIVE_BYTES) {
     throw new Error('This .c3p archive is larger than the 1 GiB in-browser limit.')
   }
 
   const paths = new Set<string>()
+  const archiveFiles = new Map<string, { readonly archivePath: string; readonly size: number }>()
   let observedEntryCount = 0
   let estimatedExpandedBytes = 0
   let unsafePathError: Error | null = null
   let sizeLimitError: Error | null = null
   let entryCountError: Error | null = null
 
-  const unzipped = await new Promise<Record<string, Uint8Array>>((resolve, reject) => {
-    try {
-      unzip(archive, {
-        filter: (entry) => {
-          observedEntryCount += 1
-          if (observedEntryCount > MAX_ARCHIVE_ENTRIES) {
-            entryCountError = new Error(`This .c3p archive contains more than ${MAX_ARCHIVE_ENTRIES.toLocaleString()} entries.`)
-            return false
-          }
+  unzipSync(archive, {
+    filter: (entry) => {
+      observedEntryCount += 1
+      if (observedEntryCount > MAX_ARCHIVE_ENTRIES) {
+        entryCountError = new Error(`This .c3p archive contains more than ${MAX_ARCHIVE_ENTRIES.toLocaleString()} entries.`)
+        return false
+      }
 
-          let path: string
-          try {
-            path = normalizeArchivePath(entry.name)
-          } catch (error) {
-            unsafePathError = error instanceof Error ? error : new Error('The .c3p archive contains an unsafe path.')
-            return false
-          }
+      let path: string
+      try {
+        path = normalizeArchivePath(entry.name)
+      } catch (error) {
+        unsafePathError = error instanceof Error ? error : new Error('The .c3p archive contains an unsafe path.')
+        return false
+      }
 
-          if (isDirectoryEntry(entry.name) || isArchiveMetadata(path)) return false
-          if (paths.has(path)) {
-            unsafePathError = new Error(`The .c3p archive contains a duplicate path: ${path}`)
-            return false
-          }
-          paths.add(path)
+      if (isDirectoryEntry(entry.name) || isArchiveMetadata(path)) return false
+      if (paths.has(path)) {
+        unsafePathError = new Error(`The .c3p archive contains a duplicate path: ${path}`)
+        return false
+      }
+      paths.add(path)
 
-          if (entry.originalSize > MAX_ENTRY_BYTES || estimatedExpandedBytes + entry.originalSize > MAX_EXPANDED_BYTES) {
-            sizeLimitError = new Error('This .c3p archive expands beyond the 2 GiB in-browser limit.')
-            return false
-          }
-          estimatedExpandedBytes += entry.originalSize
-          return true
-        },
-      }, (error, files) => {
-        if (error) reject(error)
-        else if (unsafePathError) reject(unsafePathError)
-        else if (sizeLimitError) reject(sizeLimitError)
-        else if (entryCountError) reject(entryCountError)
-        else resolve(files ?? {})
-      })
-    } catch (error) {
-      reject(error)
-    }
+      if (entry.originalSize > MAX_ENTRY_BYTES || estimatedExpandedBytes + entry.originalSize > MAX_EXPANDED_BYTES) {
+        sizeLimitError = new Error('This .c3p archive expands beyond the 2 GiB in-browser limit.')
+        return false
+      }
+      estimatedExpandedBytes += entry.originalSize
+      archiveFiles.set(path, { archivePath: entry.name, size: entry.originalSize })
+      return false
+    },
   })
+  if (unsafePathError) throw unsafePathError
+  if (sizeLimitError) throw sizeLimitError
+  if (entryCountError) throw entryCountError
 
-  const fileEntries = Object.entries(unzipped).map(([rawPath, bytes]) => [normalizeArchivePath(rawPath), bytes] as const)
-  const manifestPaths = fileEntries.map(([path]) => path).filter((path) => path === 'project.c3proj' || path.endsWith('/project.c3proj'))
+  const manifestPaths = [...archiveFiles.keys()].filter((path) => path === 'project.c3proj' || path.endsWith('/project.c3proj'))
   const manifestPath = manifestPaths.includes('project.c3proj') ? 'project.c3proj' : manifestPaths[0]
   if (!manifestPath) throw new Error('The selected .c3p archive does not contain project.c3proj.')
   if (manifestPath !== 'project.c3proj' && manifestPaths.length !== 1) {
@@ -140,15 +145,15 @@ export async function createC3pProjectFileSystem(fileName: string, archive: Uint
 
   const projectPrefix = manifestPath === 'project.c3proj' ? '' : manifestPath.slice(0, -'/project.c3proj'.length)
   const prefix = projectPrefix ? `${projectPrefix}/` : ''
-  const projectFiles = new Map<string, Uint8Array>()
-  for (const [path, bytes] of fileEntries) {
+  const projectFiles = new Map<string, { readonly archivePath: string; readonly size: number }>()
+  for (const [path, file] of archiveFiles) {
     if (projectPrefix && !path.startsWith(prefix)) continue
     const projectPath = projectPrefix ? path.slice(prefix.length) : path
-    if (projectPath) projectFiles.set(projectPath, bytes)
+    if (projectPath) projectFiles.set(projectPath, file)
   }
 
   const rootName = fileName.replaceAll('\\', '/').split('/').at(-1)?.replace(/\.c3p$/i, '') || 'Construct project'
-  return new C3pProjectFileSystem(rootName, projectFiles)
+  return new C3pProjectFileSystem(rootName, archive, projectFiles)
 }
 
 export async function createC3pProjectFileSystemFromFile(file: File): Promise<C3pProjectFileSystem> {

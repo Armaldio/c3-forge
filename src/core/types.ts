@@ -73,7 +73,7 @@ export const RELATIONSHIP_KINDS = [
 export type RelationshipKind = typeof RELATIONSHIP_KINDS[number];
 
 export const FIRST_CLASS_ENTITY_KINDS = [
-  'object', 'family', 'layout', 'eventSheet', 'function', 'variable',
+  'object', 'family', 'layout', 'eventSheet', 'function', 'variable', 'timeline', 'flowchart',
 ] as const satisfies readonly EntityKind[];
 
 export type FirstClassEntityKind = typeof FIRST_CLASS_ENTITY_KINDS[number];
@@ -167,6 +167,8 @@ export interface ProjectManifest {
   readonly projectFile: 'project.c3proj';
   readonly name: string;
   readonly constructVersion?: string;
+  /** Project-configured object name used to call event sheet functions. */
+  readonly functionsName?: string;
   readonly resources: readonly ManifestResource[];
   readonly folders: readonly ManifestFolder[];
   readonly addons: readonly ManifestAddon[];

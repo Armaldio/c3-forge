@@ -34,6 +34,13 @@ export interface GraphNode {
   readonly outgoing: number
 }
 
+export interface GraphColumn {
+  readonly rank: number
+  readonly x: number
+  /** Horizontal space reserved after this node column for same-column routes and labels. */
+  readonly gutter: number
+}
+
 export interface GraphEdge {
   readonly dependency: ProjectDependency
   readonly source: ForgeEntity
@@ -44,6 +51,7 @@ export interface GraphEdge {
 export interface GraphModel {
   readonly nodes: readonly GraphNode[]
   readonly edges: readonly GraphEdge[]
+  readonly columns: readonly GraphColumn[]
   readonly width: number
   readonly height: number
 }
@@ -92,6 +100,10 @@ const NODE_HEIGHT = 70
 const COLUMN_GAP = 88
 const ROW_GAP = 28
 const PADDING = 56
+const ROUTE_LABEL_START = 48
+const ROUTE_LABEL_MAX_WIDTH = 220
+const ROUTE_LABEL_PADDING = 12
+const ROUTE_LANE_GAP = 20
 
 export function buildGraphModel(analysis: ProjectAnalysis, options: GraphModelOptions): GraphModel {
   const allowedKinds = new Set(options.entityKinds)
@@ -147,8 +159,10 @@ export function buildGraphModel(analysis: ProjectAnalysis, options: GraphModelOp
   }
   const includedEntities = eligibleEntities.filter((entity) => connectedIds.has(entity.id))
   const lanes = new Map<number, ForgeEntity[]>()
+  const ranksById = new Map<string, number>()
   for (const entity of includedEntities) {
     const rank = KIND_RANK[entity.kind as GraphEntityKind]
+    ranksById.set(entity.id, rank)
     const lane = lanes.get(rank) ?? []
     lane.push(entity)
     lanes.set(rank, lane)
@@ -157,25 +171,48 @@ export function buildGraphModel(analysis: ProjectAnalysis, options: GraphModelOp
     lane.sort((left, right) => left.name.localeCompare(right.name) || left.sourcePath.localeCompare(right.sourcePath))
   }
 
-  const positions = new Map<string, GraphPoint>()
-  for (const [rank, lane] of lanes) {
-    lane.forEach((entity, row) => positions.set(entity.id, {
-      x: PADDING + rank * (NODE_WIDTH + COLUMN_GAP),
-      y: PADDING + row * (NODE_HEIGHT + ROW_GAP),
-    }))
-  }
-
-  const includedEdges = edges.filter((edge) => positions.has(edge.source.id) && positions.has(edge.target.id))
+  const includedEdges = edges.filter((edge) => ranksById.has(edge.source.id) && ranksById.has(edge.target.id))
     .sort((left, right) => left.source.name.localeCompare(right.source.name)
       || left.target.name.localeCompare(right.target.name)
       || left.dependency.relationship.localeCompare(right.dependency.relationship))
   const sameColumnCounts = new Map<number, number>()
+  for (const edge of includedEdges) {
+    const sourceRank = ranksById.get(edge.source.id)
+    if (sourceRank === undefined || sourceRank !== ranksById.get(edge.target.id)) continue
+    sameColumnCounts.set(sourceRank, (sameColumnCounts.get(sourceRank) ?? 0) + 1)
+  }
+
+  const columns: GraphColumn[] = []
+  let nextColumnX = PADDING
+  for (const rank of [...lanes.keys()].sort((left, right) => left - right)) {
+    const sameColumnEdges = sameColumnCounts.get(rank) ?? 0
+    const gutter = sameColumnEdges > 0
+      ? Math.max(
+        COLUMN_GAP,
+        ROUTE_LABEL_START + (sameColumnEdges - 1) * ROUTE_LANE_GAP
+          + ROUTE_LABEL_MAX_WIDTH + ROUTE_LABEL_PADDING,
+      )
+      : COLUMN_GAP
+    columns.push({ rank, x: nextColumnX, gutter })
+    nextColumnX += NODE_WIDTH + gutter
+  }
+  const columnByRank = new Map(columns.map((column) => [column.rank, column]))
+  const positions = new Map<string, GraphPoint>()
+  for (const [rank, lane] of lanes) {
+    const column = columnByRank.get(rank)
+    if (!column) continue
+    lane.forEach((entity, row) => positions.set(entity.id, {
+      x: column.x,
+      y: PADDING + row * (NODE_HEIGHT + ROW_GAP),
+    }))
+  }
+
+  const sameColumnRouteLanes = new Map<number, number>()
   const edgesWithLanes = includedEdges.map((edge) => {
-    const sourcePosition = positions.get(edge.source.id)
-    const targetPosition = positions.get(edge.target.id)
-    if (!sourcePosition || !targetPosition || sourcePosition.x !== targetPosition.x) return { ...edge, routeLane: 0 }
-    const routeLane = sameColumnCounts.get(sourcePosition.x) ?? 0
-    sameColumnCounts.set(sourcePosition.x, routeLane + 1)
+    const sourceRank = ranksById.get(edge.source.id)
+    if (sourceRank === undefined || sourceRank !== ranksById.get(edge.target.id)) return { ...edge, routeLane: 0 }
+    const routeLane = sameColumnRouteLanes.get(sourceRank) ?? 0
+    sameColumnRouteLanes.set(sourceRank, routeLane + 1)
     return { ...edge, routeLane }
   })
   const incomingCounts = new Map<string, number>()
@@ -192,13 +229,13 @@ export function buildGraphModel(analysis: ProjectAnalysis, options: GraphModelOp
     outgoing: outgoingCounts.get(entity.id) ?? 0,
   }))
   const maxRows = Math.max(1, ...[...lanes.values()].map((lane) => lane.length))
-  const maxRank = Math.max(0, ...lanes.keys())
-  const maxRoutingLanes = Math.max(0, ...sameColumnCounts.values())
+  const lastColumn = columns.at(-1)
 
   return {
     nodes,
     edges: edgesWithLanes,
-    width: PADDING * 2 + (maxRank + 1) * NODE_WIDTH + maxRank * COLUMN_GAP + maxRoutingLanes * 20,
+    columns,
+    width: lastColumn ? lastColumn.x + NODE_WIDTH + lastColumn.gutter + PADDING : PADDING * 2,
     height: PADDING * 2 + maxRows * NODE_HEIGHT + Math.max(0, maxRows - 1) * ROW_GAP,
   }
 }

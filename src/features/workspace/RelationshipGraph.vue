@@ -6,7 +6,7 @@ import {
   buildGraphModel,
   firstClassEntityCount,
   graphEntityKinds,
-  graphFocusEntityId,
+  graphFocusEntityId as suggestedGraphFocusEntityId,
   graphKindsWithSelection,
   graphRelationshipKinds,
   type GraphEdge,
@@ -17,10 +17,12 @@ import {
 const props = defineProps<{
   analysis: ProjectAnalysis
   selectedEntityId: string | null
+  graphFocusEntityId?: string | null
 }>()
 
 const emit = defineEmits<{
   'open-entity': [id: string]
+  'update:graphFocusEntityId': [id: string | null]
 }>()
 
 const DEFAULT_ENTITY_KINDS: readonly GraphEntityKind[] = ['eventSheet', 'function', 'object', 'family', 'layout']
@@ -49,16 +51,17 @@ const relationshipFilters = reactive<Record<RelationshipKind, boolean>>({
 } as Record<RelationshipKind, boolean>)
 const graphMode = ref<GraphMode>(props.selectedEntityId || firstClassEntityCount(props.analysis) > 100 ? 'focus' : 'project')
 const focusHops = ref<1 | 2>(1)
-const graphSelectedId = ref(props.selectedEntityId
-  ?? graphFocusEntityId(props.analysis, DEFAULT_ENTITY_KINDS)
+const graphSelectedId = ref(props.graphFocusEntityId
+  ?? props.selectedEntityId
+  ?? suggestedGraphFocusEntityId(props.analysis, DEFAULT_ENTITY_KINDS)
   ?? '')
-const graphSelectionExplicit = ref(Boolean(props.selectedEntityId))
+const graphSelectionExplicit = ref(Boolean(props.graphFocusEntityId ?? props.selectedEntityId))
 const zoom = ref(1)
 const pan = ref({ x: 0, y: 0 })
 const graphCanvas = ref<HTMLElement | null>(null)
 const dragOrigin = ref<{ pointerX: number; pointerY: number; panX: number; panY: number }>()
 
-const initiallySelectedEntity = props.analysis.index.byId.get(props.selectedEntityId ?? '')
+const initiallySelectedEntity = props.analysis.index.byId.get(props.graphFocusEntityId ?? props.selectedEntityId ?? '')
 if (initiallySelectedEntity && graphEntityKinds.includes(initiallySelectedEntity.kind as GraphEntityKind)) {
   entityFilters[initiallySelectedEntity.kind as GraphEntityKind] = true
 }
@@ -68,7 +71,7 @@ const selectedRelationships = computed(() => graphRelationshipKinds.filter((kind
 const focusEntityId = computed(() => {
   const selected = graphSelectedId.value || props.selectedEntityId
   if (selected) return selected
-  return graphFocusEntityId(props.analysis, selectedKinds.value)
+  return suggestedGraphFocusEntityId(props.analysis, selectedKinds.value)
 })
 const model = computed(() => buildGraphModel(props.analysis, {
   entityKinds: selectedKinds.value,
@@ -106,6 +109,18 @@ watch(() => props.selectedEntityId, (entityId) => {
   graphMode.value = 'focus'
 })
 
+watch(() => props.graphFocusEntityId, (entityId) => {
+  const restoredEntityId = entityId
+    ?? props.selectedEntityId
+    ?? suggestedGraphFocusEntityId(props.analysis, selectedKinds.value)
+    ?? ''
+  graphSelectedId.value = restoredEntityId
+  graphSelectionExplicit.value = Boolean(entityId ?? props.selectedEntityId)
+  const entity = props.analysis.index.byId.get(restoredEntityId)
+  if (entity) enableSelectedKind(entity.kind)
+  if (entityId || props.selectedEntityId) graphMode.value = 'focus'
+})
+
 watch([graphMode, graphSelectedId, selectedKinds], () => {
   if (graphMode.value !== 'focus') return
   const entity = props.analysis.index.byId.get(graphSelectedId.value)
@@ -113,11 +128,12 @@ watch([graphMode, graphSelectedId, selectedKinds], () => {
 })
 
 watch(() => props.analysis, (analysis) => {
-  graphSelectedId.value = props.selectedEntityId
-    ?? graphFocusEntityId(analysis, DEFAULT_ENTITY_KINDS)
+  graphSelectedId.value = props.graphFocusEntityId
+    ?? props.selectedEntityId
+    ?? suggestedGraphFocusEntityId(analysis, DEFAULT_ENTITY_KINDS)
     ?? ''
-  graphSelectionExplicit.value = Boolean(props.selectedEntityId)
-  graphMode.value = props.selectedEntityId || firstClassEntityCount(analysis) > 100 ? 'focus' : 'project'
+  graphSelectionExplicit.value = Boolean(props.graphFocusEntityId ?? props.selectedEntityId)
+  graphMode.value = props.graphFocusEntityId || props.selectedEntityId || firstClassEntityCount(analysis) > 100 ? 'focus' : 'project'
   zoom.value = 1
   pan.value = { x: 0, y: 0 }
 })
@@ -125,6 +141,7 @@ watch(() => props.analysis, (analysis) => {
 function chooseNode(entityId: string): void {
   graphSelectedId.value = entityId
   graphSelectionExplicit.value = true
+  emit('update:graphFocusEntityId', entityId)
 }
 
 function enableSelectedKind(kind: Parameters<typeof graphKindsWithSelection>[1]): void {
@@ -451,7 +468,7 @@ function setProjectMode(): void {
                 :aria-label="`${node.entity.name}, ${entityKindLabel[node.entity.kind]}, ${node.incoming} incoming dependency edges, ${node.outgoing} outgoing dependency edges`"
                 @pointerdown.stop
                 @click.stop="chooseNode(node.entity.id)"
-                @dblclick.stop="graphSelectedId = node.entity.id; openSelectedEntity()"
+                @dblclick.stop="chooseNode(node.entity.id); openSelectedEntity()"
                 @keydown.enter.stop.prevent="chooseNode(node.entity.id)"
                 @keydown.space.stop.prevent="chooseNode(node.entity.id)"
               >

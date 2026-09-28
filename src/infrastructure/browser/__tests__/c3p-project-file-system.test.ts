@@ -7,6 +7,36 @@ function archive(files: Record<string, string>): Uint8Array {
   return zipSync(Object.fromEntries(Object.entries(files).map(([path, text]) => [path, strToU8(text)])))
 }
 
+function setUnsupportedCompression(bytes: Uint8Array, filename: string): void {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  let changedLocal = false
+  for (let offset = 0; offset + 30 < bytes.length; offset += 1) {
+    const signature = view.getUint32(offset, true)
+    if (signature === 0x04034b50) {
+      const nameLength = view.getUint16(offset + 26, true)
+      const nameStart = offset + 30
+      const name = new TextDecoder().decode(bytes.subarray(nameStart, nameStart + nameLength))
+      if (name === filename) {
+        view.setUint16(offset + 8, 99, true)
+        changedLocal = true
+      }
+    } else if (signature === 0x02014b50) {
+      const nameLength = view.getUint16(offset + 28, true)
+      const extraLength = view.getUint16(offset + 30, true)
+      const commentLength = view.getUint16(offset + 32, true)
+      const nameStart = offset + 46
+      const name = new TextDecoder().decode(bytes.subarray(nameStart, nameStart + nameLength))
+      if (name === filename) {
+        view.setUint16(offset + 10, 99, true)
+        return
+      }
+      offset += 45 + nameLength + extraLength + commentLength
+    }
+  }
+  if (!changedLocal) throw new Error(`Could not find local ZIP entry ${filename}`)
+  throw new Error(`Could not find central ZIP entry ${filename}`)
+}
+
 describe('C3P archive project filesystem', () => {
   it('exposes a project stored at the archive root through the read-only filesystem API', async () => {
     const filesystem = await createC3pProjectFileSystem('game.c3p', archive({
@@ -18,6 +48,7 @@ describe('C3P archive project filesystem', () => {
     expect(filesystem.rootName).toBe('game')
     expect(await filesystem.exists('project.c3proj')).toBe(true)
     expect(await filesystem.readText('eventSheets/Events.json')).toBe('{"events":[]}')
+    expect(await filesystem.stat('images/player.png')).toEqual({ size: 'image bytes'.length })
     expect(new TextDecoder().decode(await filesystem.readBinary('images/player.png'))).toBe('image bytes')
     expect(await filesystem.listFiles('eventSheets')).toEqual(['eventSheets/Events.json'])
     expect(await filesystem.listDirectories('')).toEqual(['eventSheets', 'images'])
@@ -60,5 +91,19 @@ describe('C3P archive project filesystem', () => {
     expect(analysis.manifest.name).toBe('Playable Archive')
     expect(analysis.index.byKind.get('layout')?.map((layout) => layout.name)).toEqual(['Start'])
     expect(analysis.stats.totalReferences).toBe(0)
+  })
+
+  it('indexes archive metadata without inflating unselected entries', async () => {
+    const bytes = archive({
+      'project.c3proj': '{"name":"Lazy"}',
+      'images/selected.png': 'selected image bytes',
+      'images/broken.png': 'unselected compressed bytes that should stay untouched',
+    })
+    setUnsupportedCompression(bytes, 'images/broken.png')
+
+    const filesystem = await createC3pProjectFileSystem('lazy.c3p', bytes)
+    expect(await filesystem.stat('images/selected.png')).toEqual({ size: 'selected image bytes'.length })
+    expect(new TextDecoder().decode(await filesystem.readBinary('images/selected.png'))).toBe('selected image bytes')
+    await expect(filesystem.readBinary('images/broken.png')).rejects.toThrow()
   })
 })

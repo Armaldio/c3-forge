@@ -1,17 +1,24 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
-import type { ForgeEntity, ProjectAnalysis, ProjectLoadStage } from '../../core/types'
+import { computed, nextTick, ref } from 'vue'
+import type { EntityKind, ForgeEntity, ProjectAnalysis, ProjectLoadStage } from '../../core/types'
+import type { ProjectFileSystem } from '../../core/filesystem'
+import type { NavigationEntry, NavigationView } from '../../application/navigation'
 import EntityExplorer from './EntityExplorer.vue'
 import EntityView from './EntityView.vue'
 import GlobalSearch from './GlobalSearch.vue'
 import ProjectDiagnostics from './ProjectDiagnostics.vue'
 import ProjectOverview from './ProjectOverview.vue'
 import RelationshipGraph from './RelationshipGraph.vue'
+import ResourcesView from './ResourcesView.vue'
 import { loadStageLabel, summarizeProjectDiagnostics } from './presentation'
 
 const props = defineProps<{
   analysis: ProjectAnalysis | null
+  filesystem: ProjectFileSystem | null
   selectedEntityId: string | null
+  navigationEntry: NavigationEntry
+  canNavigateBack: boolean
+  canNavigateForward: boolean
   searchQuery: string
   searchResults: readonly ForgeEntity[]
   loading: boolean
@@ -25,6 +32,10 @@ const emit = defineEmits<{
   'open-archive': [file: File]
   'update:searchQuery': [value: string]
   'select-entity': [id: string]
+  'navigate-view': [view: NavigationView]
+  'navigate-back': []
+  'navigate-forward': []
+  'graph-focus-change': [id: string | null]
   'clear-project': []
 }>()
 
@@ -32,17 +43,21 @@ const loadingLabel = computed(() => props.loadingStage ? loadStageLabel[props.lo
 const archiveInput = ref<HTMLInputElement | null>(null)
 const projectMenu = ref<HTMLDetailsElement | null>(null)
 const diagnosticsToggle = ref<HTMLButtonElement | null>(null)
+const explorer = ref<{ revealKind: (kind: EntityKind) => Promise<void> } | null>(null)
 const diagnosticsOpen = ref(false)
-const activeWorkspaceView = ref<'overview' | 'graph'>('overview')
+const activeWorkspaceView = computed(() => props.navigationEntry.view)
+const navigationTitle = computed(() => {
+  const focusId = activeWorkspaceView.value === 'graph'
+    ? props.navigationEntry.graphFocusEntityId ?? props.selectedEntityId
+    : props.selectedEntityId
+  const entity = focusId ? props.analysis?.index.byId.get(focusId) : undefined
+  return entity?.name ?? ({ overview: 'Project overview', graph: 'Relationship graph', resources: 'Project resources' }[activeWorkspaceView.value])
+})
 const diagnosticSummary = computed(() => summarizeProjectDiagnostics(props.analysis?.diagnostics ?? []))
 const diagnosticMark = computed(() => {
   if (diagnosticSummary.value.state === 'clear') return '✓'
   if (diagnosticSummary.value.state === 'info') return 'i'
   return '!'
-})
-
-watch(() => props.selectedEntityId, (selectedId) => {
-  if (selectedId) activeWorkspaceView.value = 'overview'
 })
 
 function closeProjectMenu(): void {
@@ -69,8 +84,15 @@ function closeDiagnostics(): void {
 }
 
 function openGraphEntity(entityId: string): void {
-  activeWorkspaceView.value = 'overview'
   emit('select-entity', entityId)
+}
+
+function revealExplorerKind(kind: 'object' | 'eventSheet'): void {
+  void explorer.value?.revealKind(kind)
+}
+
+function selectView(view: NavigationView): void {
+  emit('navigate-view', view)
 }
 
 function selectSearchResult(entityId: string): void {
@@ -229,37 +251,76 @@ function handleArchiveSelection(event: Event): void {
           aria-label="Project workspace"
         >
           <EntityExplorer
+            ref="explorer"
             :analysis="analysis"
             :selected-entity-id="selectedEntityId"
             @select="emit('select-entity', $event)"
           />
           <div class="main-column">
-            <nav
-              class="workspace-view-tabs"
-              role="tablist"
-              aria-label="Project views"
-            >
-              <button
-                id="workspace-tab-overview"
-                type="button"
-                role="tab"
-                :aria-selected="activeWorkspaceView === 'overview'"
-                aria-controls="workspace-panel-overview"
-                @click="activeWorkspaceView = 'overview'"
+            <div class="workspace-navigation-bar">
+              <div
+                class="workspace-history-controls"
+                aria-label="Navigation history"
               >
-                Overview
-              </button>
-              <button
-                id="workspace-tab-graph"
-                type="button"
-                role="tab"
-                :aria-selected="activeWorkspaceView === 'graph'"
-                aria-controls="workspace-panel-graph"
-                @click="activeWorkspaceView = 'graph'"
+                <button
+                  type="button"
+                  aria-label="Go back"
+                  title="Go back"
+                  :disabled="!canNavigateBack"
+                  @click="emit('navigate-back')"
+                >
+                  ←
+                </button>
+                <button
+                  type="button"
+                  aria-label="Go forward"
+                  title="Go forward"
+                  :disabled="!canNavigateForward"
+                  @click="emit('navigate-forward')"
+                >
+                  →
+                </button>
+              </div>
+              <nav
+                class="workspace-view-tabs"
+                role="tablist"
+                aria-label="Project views"
               >
-                Graph
-              </button>
-            </nav>
+                <button
+                  id="workspace-tab-overview"
+                  type="button"
+                  role="tab"
+                  :aria-selected="activeWorkspaceView === 'overview'"
+                  aria-controls="workspace-panel-overview"
+                  @click="selectView('overview')"
+                >
+                  Overview
+                </button>
+                <button
+                  id="workspace-tab-graph"
+                  type="button"
+                  role="tab"
+                  :aria-selected="activeWorkspaceView === 'graph'"
+                  aria-controls="workspace-panel-graph"
+                  @click="selectView('graph')"
+                >
+                  Graph
+                </button>
+                <button
+                  id="workspace-tab-resources"
+                  type="button"
+                  role="tab"
+                  :aria-selected="activeWorkspaceView === 'resources'"
+                  aria-controls="workspace-panel-resources"
+                  @click="selectView('resources')"
+                >
+                  Resources
+                </button>
+              </nav>
+              <h1 class="workspace-navigation-title">
+                {{ navigationTitle }}
+              </h1>
+            </div>
             <section
               v-show="activeWorkspaceView === 'overview'"
               id="workspace-panel-overview"
@@ -270,6 +331,8 @@ function handleArchiveSelection(event: Event): void {
               <ProjectOverview
                 v-if="!selectedEntityId"
                 :analysis="analysis"
+                @explore-kind="revealExplorerKind"
+                @navigate-view="selectView"
               />
               <EntityView
                 v-else
@@ -288,7 +351,23 @@ function handleArchiveSelection(event: Event): void {
               <RelationshipGraph
                 :analysis="analysis"
                 :selected-entity-id="selectedEntityId"
+                :graph-focus-entity-id="navigationEntry.graphFocusEntityId"
                 @open-entity="openGraphEntity"
+                @update:graph-focus-entity-id="emit('graph-focus-change', $event)"
+              />
+            </section>
+            <section
+              v-if="activeWorkspaceView === 'resources'"
+              id="workspace-panel-resources"
+              class="workspace-view-panel"
+              role="tabpanel"
+              aria-labelledby="workspace-tab-resources"
+            >
+              <ResourcesView
+                v-if="analysis && filesystem"
+                :analysis="analysis"
+                :filesystem="filesystem"
+                :active="true"
               />
             </section>
           </div>

@@ -52,6 +52,11 @@ export class BrowserProjectFileSystem implements ProjectFileSystem {
     return (await file.getFile()).text()
   }
 
+  async stat(path: string): Promise<{ readonly size: number }> {
+    const file = await this.fileHandle(path)
+    return { size: (await file.getFile()).size }
+  }
+
   async readBinary(path: string): Promise<Uint8Array> {
     const file = await this.fileHandle(path)
     return new Uint8Array(await (await file.getFile()).arrayBuffer())

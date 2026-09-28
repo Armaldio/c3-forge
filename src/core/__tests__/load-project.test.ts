@@ -137,6 +137,7 @@ describe('Construct project core', () => {
     const manifest = {
       name: 'Nested',
       savedWithRelease: 'r400',
+      functionsName: 'Routines',
       objectTypes: { items: ['Player', 'Player.v2'], subfolders: [{ name: 'World', items: ['Enemy'], subfolders: [] }] },
       rootFileFolders: { general: { items: [{ name: 'badge.png', type: 'image' }], subfolders: [] } },
       usedAddons: [{ id: 'addon.id', name: 'Addon', type: 'plugin' }],
@@ -151,6 +152,7 @@ describe('Construct project core', () => {
     expect(normalized.resources[1]?.name).toBe('Player.v2');
     expect(normalized.folders).toContainEqual({ kind: 'projectFolder', path: 'objectTypes/World' });
     expect(normalized.constructVersion).toBe('r400');
+    expect(normalized.functionsName).toBe('Routines');
     expect(normalized.addons[0]?.id).toBe('addon.id');
     expect(normalizeProjectPath('objectTypes\\World\\Enemy.json')).toBe('objectTypes/World/Enemy.json');
     expect(resolveProjectPath('layouts/Nested/Main.json', '../Shared.json')).toBe('layouts/Shared.json');
@@ -165,6 +167,47 @@ describe('Construct project core', () => {
 
     const emptyTimelineFolder = parseProjectManifestResult({ timelines: { items: [], subfolders: [{ items: [], subfolders: [] }] } });
     expect(emptyTimelineFolder.issues).toEqual([]);
+  });
+
+  it('uses the configured Functions object for expressions and serialized calls without resolving it as an object', async () => {
+    const analysis = await loadProject(fixtureFileSystem('semantic-project', (files) => {
+      const manifestPath = 'project.c3proj';
+      const manifestBytes = files.get(manifestPath);
+      if (!manifestBytes) throw new Error(`Missing fixture file: ${manifestPath}`);
+      const manifest = JSON.parse(new TextDecoder().decode(manifestBytes)) as {
+        functionsName?: string;
+        objectTypes: { items: string[] };
+      };
+      manifest.functionsName = 'Routines';
+      manifest.objectTypes.items.push('Routines');
+      files.set(manifestPath, new TextEncoder().encode(JSON.stringify(manifest)));
+      files.set('objectTypes/Routines.json', new TextEncoder().encode(JSON.stringify({
+        name: 'Routines', 'plugin-id': 'Sprite', sid: 95000, animations: { items: [] },
+      })));
+
+      const sheetPath = 'eventSheets/Gameplay/Combat.json';
+      const sheetBytes = files.get(sheetPath);
+      if (!sheetBytes) throw new Error(`Missing fixture file: ${sheetPath}`);
+      const sheet = JSON.parse(new TextDecoder().decode(sheetBytes)) as { events: unknown[] };
+      sheet.events.push({
+        sid: 95001,
+        conditions: [{ objectClass: 'Routines', callFunction: 'AwardCoins' }],
+        actions: [
+          { objectClass: 'Routines', callFunction: 'AwardCoins' },
+          { id: 'set-value', objectClass: 'Routines', parameters: { expression: 'Routines.AwardCoins(1)' } },
+        ],
+      });
+      files.set(sheetPath, new TextEncoder().encode(JSON.stringify(sheet)));
+    }));
+
+    const calls = analysis.references.filter((reference) =>
+      reference.sourceLocation?.eventSid === '95001' && reference.relationship === 'function-call');
+    expect(calls).toHaveLength(3);
+    expect(calls.every((reference) => analysis.index.byId.get(reference.targetEntityId)?.name === 'AwardCoins')).toBe(true);
+    expect(analysis.references.some((reference) =>
+      reference.sourceLocation?.eventSid === '95001' && reference.relationship === 'object-reference')).toBe(false);
+    expect(analysis.unresolvedReferences.some((reference) => reference.sourceLocation?.eventSid === '95001')).toBe(false);
+    expect(analysis.index.byKind.get('object')?.some((entity) => entity.name === 'Routines')).toBe(true);
   });
 
   it('provides read-only file operations through the in-memory filesystem contract', async () => {
@@ -345,9 +388,85 @@ describe('Construct project core', () => {
       sourceLocation: { jsonPath: '$.animations.items[0].frames[0]' },
     }));
     const imageReference = analysis.references.find((reference) => reference.relationship === 'frame-image'
+      && analysis.index.byId.get(reference.sourceEntityId)?.sourcePath === 'objectTypes/PlayerAnim.json'
       && reference.sourceLocation?.jsonPath === '$.animations.items[0].frames[0]');
     expect(imageReference && analysis.index.byId.get(imageReference.targetEntityId)?.sourcePath)
       .toBe('images/playeranim-walk-000.webp');
+  });
+
+  it('uses a unique case-insensitive frame image path only when the exact path is absent', async () => {
+    const analysis = await loadProject(fixtureFileSystem('construct-platformer', (files) => {
+      const exactPath = 'images/playeranim-walk-000.png';
+      const image = files.get(exactPath);
+      if (!image) throw new Error(`Missing fixture image: ${exactPath}`);
+      files.delete(exactPath);
+      files.set('images/PLAYERANIM-WALK-000.PNG', image);
+    }));
+    const imageReference = analysis.references.find((reference) => reference.relationship === 'frame-image'
+      && analysis.index.byId.get(reference.sourceEntityId)?.sourcePath === 'objectTypes/PlayerAnim.json'
+      && reference.sourceLocation?.jsonPath === '$.animations.items[0].frames[0]');
+
+    expect(imageReference && analysis.index.byId.get(imageReference.targetEntityId)?.sourcePath)
+      .toBe('images/PLAYERANIM-WALK-000.PNG');
+    expect(analysis.unresolvedReferences.some((reference) => reference.relationship === 'frame-image'
+      && analysis.index.byId.get(reference.sourceEntityId)?.sourcePath === 'objectTypes/PlayerAnim.json'
+      && reference.sourceLocation?.jsonPath === '$.animations.items[0].frames[0]')).toBe(false);
+  });
+
+  it('reports colliding case-insensitive frame paths as ambiguous when the exact path is absent', async () => {
+    const analysis = await loadProject(fixtureFileSystem('construct-platformer', (files) => {
+      const exactPath = 'images/playeranim-walk-000.png';
+      const image = files.get(exactPath);
+      if (!image) throw new Error(`Missing fixture image: ${exactPath}`);
+      files.delete(exactPath);
+      files.set('images/PLAYERANIM-WALK-000.PNG', image);
+      files.set('images/PlayerAnim-Walk-000.png', image);
+    }));
+
+    expect(analysis.unresolvedReferences).toContainEqual(expect.objectContaining({
+      relationship: 'frame-image',
+      targetName: 'images/playeranim-walk-000.png',
+      resolution: 'ambiguous',
+      candidateEntityIds: expect.arrayContaining([expect.any(String), expect.any(String)]),
+    }));
+  });
+
+  it('prefers an exact frame image path over case-insensitive collisions', async () => {
+    const analysis = await loadProject(fixtureFileSystem('construct-platformer', (files) => {
+      const exactPath = 'images/playeranim-walk-000.png';
+      const image = files.get(exactPath);
+      if (!image) throw new Error(`Missing fixture image: ${exactPath}`);
+      files.set('images/PLAYERANIM-WALK-000.PNG', image);
+    }));
+    const imageReference = analysis.references.find((reference) => reference.relationship === 'frame-image'
+      && analysis.index.byId.get(reference.sourceEntityId)?.sourcePath === 'objectTypes/PlayerAnim.json'
+      && reference.sourceLocation?.jsonPath === '$.animations.items[0].frames[0]');
+
+    expect(imageReference && analysis.index.byId.get(imageReference.targetEntityId)?.sourcePath)
+      .toBe('images/playeranim-walk-000.png');
+    expect(analysis.unresolvedReferences.some((reference) => reference.relationship === 'frame-image'
+      && reference.sourceEntityId === imageReference?.sourceEntityId
+      && reference.sourceLocation?.jsonPath === '$.animations.items[0].frames[0]')).toBe(false);
+  });
+
+  it('does not guess a JPEG frame extension without real Construct serialization evidence', async () => {
+    const analysis = await loadProject(fixtureFileSystem('construct-platformer', (files) => {
+      const objectPath = 'objectTypes/PlayerAnim.json';
+      const source = files.get(objectPath);
+      if (!source) throw new Error(`Missing fixture file: ${objectPath}`);
+      const object = JSON.parse(new TextDecoder().decode(source)) as {
+        animations: { items: { frames: { fileType: string }[] }[] };
+      };
+      object.animations.items[0]!.frames[0]!.fileType = 'image/jpeg';
+      files.set(objectPath, new TextEncoder().encode(JSON.stringify(object)));
+    }));
+
+    expect(analysis.references.some((reference) => reference.relationship === 'frame-image'
+      && analysis.index.byId.get(reference.sourceEntityId)?.sourcePath === 'objectTypes/PlayerAnim.json'
+      && reference.sourceLocation?.jsonPath === '$.animations.items[0].frames[0]')).toBe(false);
+    expect(analysis.unresolvedReferences.some((reference) => reference.relationship === 'frame-image'
+      && reference.sourcePath === 'objectTypes/PlayerAnim.json'
+      && reference.sourceLocation?.jsonPath === '$.animations.items[0].frames[0]')).toBe(false);
   });
 
   it('reports ambiguous function definition names instead of choosing one', async () => {

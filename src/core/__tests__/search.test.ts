@@ -14,6 +14,15 @@ describe('project entity search ordering', () => {
     expect(results.map((entity) => entity.kind)).toEqual(['object', 'eventSheet', 'event', 'animationFrame'])
   })
 
+  it('ranks timelines and flowcharts as first-class project entities', () => {
+    const event = createForgeEntity('event', 'Shared Flow', 'eventSheets/Shared.json')
+    const timeline = createForgeEntity('timeline', 'Shared Flow', 'timelines/Shared.json')
+    const flowchart = createForgeEntity('flowchart', 'Shared Flow', 'flowcharts/Shared.json')
+
+    expect(searchEntities(createProjectIndex([event, flowchart, timeline]), 'shared flow').map((entity) => entity.kind))
+      .toEqual(['timeline', 'flowchart', 'event'])
+  })
+
   it('retains explicit kind searches for hidden semantic entities', () => {
     const event = createForgeEntity('event', 'Player event', 'eventSheets/Game.json')
     const object = createForgeEntity('object', 'Player', 'objectTypes/Player.json')

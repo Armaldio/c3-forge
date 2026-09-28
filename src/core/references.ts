@@ -12,10 +12,11 @@ import type {
 } from './types';
 
 const EVENT_REFERENCE_KINDS: readonly EntityKind[] = ['object', 'family'];
-const NON_OBJECT_CLASSES = new Set(['system', 'function', 'functions']);
+const RESERVED_NON_OBJECT_CLASSES = new Set(['system', 'function']);
 const EVENT_VARIABLE_PARAMETER_ACTIONS = new Set(['set-eventvar-value', 'add-to-eventvar']);
 const EVENT_VARIABLE_PARAMETER_CONDITIONS = new Set(['compare-eventvar']);
 const EXPRESSION_PARAMETER_NAMES = new Set(['count', 'expression', 'first-value', 'second-value', 'text', 'value']);
+// The checked-in real Construct corpus does not contain JPEG frame metadata to prove its image suffix.
 const FRAME_IMAGE_EXTENSION_BY_TYPE: Readonly<Record<string, string>> = {
   'image/png': '.png',
   'image/gif': '.gif',
@@ -351,7 +352,7 @@ const BINARY_PRECEDENCE: Readonly<Record<string, number>> = {
   '^': 6,
 };
 
-function parseExpression(value: string): readonly ExpressionReference[] | undefined {
+function parseExpression(value: string, functionsName: string): readonly ExpressionReference[] | undefined {
   const tokenized = tokenizeExpression(value);
   if (!tokenized) return undefined;
   const tokens: readonly ExpressionToken[] = tokenized;
@@ -392,7 +393,7 @@ function parseExpression(value: string): readonly ExpressionReference[] | undefi
     }
     if (token.kind !== 'identifier') return false;
 
-    const isFunctionsObject = token.value.toLocaleLowerCase('en-US') === 'functions';
+    const isFunctionsObject = nameKey(token.value) === nameKey(functionsName);
     if (isFunctionsObject && peek()?.value === '.') {
       take();
       const member = take();
@@ -527,13 +528,14 @@ function addExpressionRelationships(
   collector: RelationshipCollector,
   scope: EventScope,
   location: ReferenceSourceLocation,
+  functionsName: string,
   expressionOwner?: ForgeEntity,
 ): void {
   if (expression.length > MAX_EXPRESSION_LENGTH) {
     collector.unsupportedExpressionCount += 1;
     return;
   }
-  const expressionReferences = parseExpression(expression);
+  const expressionReferences = parseExpression(expression, functionsName);
   if (!expressionReferences) {
     collector.unsupportedExpressionCount += 1;
     return;
@@ -677,7 +679,12 @@ function extractStructureRelationships(resource: ParsedResource, index: ProjectI
         || !/^[a-z0-9 _-]+$/i.test(resource.entity.name)
         || !/^[a-z0-9 _-]+$/i.test(animationName)) continue;
       const expectedPath = `images/${resource.entity.name.toLowerCase()}-${animationName.toLowerCase()}-${String(frameIndex).padStart(3, '0')}${extension}`;
-      const matchingAssets = (index.bySourcePath.get(expectedPath) ?? []).filter((entity) => entity.kind === 'asset');
+      const exactAssets = (index.bySourcePath.get(expectedPath) ?? []).filter((entity) => entity.kind === 'asset');
+      // Preserve exact Construct paths; only use a case-insensitive match when the exact path is absent.
+      const matchingAssets = exactAssets.length > 0
+        ? exactAssets
+        : (index.byKind.get('asset') ?? []).filter((entity) =>
+          entity.sourcePath.toLocaleLowerCase('en-US') === expectedPath.toLocaleLowerCase('en-US'));
       const resolution: Resolution<ForgeEntity> = matchingAssets.length === 1
         ? { status: 'resolved', value: matchingAssets[0] as ForgeEntity }
         : matchingAssets.length > 1
@@ -723,6 +730,7 @@ function extractEventSheetRelationships(
   index: ProjectIndex,
   collector: RelationshipCollector,
   memberships: FamilyMemberships,
+  functionsName: string,
 ): void {
   if (resource.descriptor.kind !== 'eventSheet' || !isRecord(resource.raw) || !Array.isArray(resource.raw.events)) return;
 
@@ -777,10 +785,13 @@ function extractEventSheetRelationships(
         entryIndex,
       };
       const objectClass = typeof entry.objectClass === 'string' ? entry.objectClass : undefined;
-      const objectClassResolution = objectClass && !NON_OBJECT_CLASSES.has(objectClass.toLowerCase())
+      const isFunctionObject = objectClass !== undefined && nameKey(objectClass) === nameKey(functionsName);
+      const isNonObjectClass = objectClass !== undefined
+        && (RESERVED_NON_OBJECT_CLASSES.has(objectClass.toLocaleLowerCase('en-US')) || isFunctionObject);
+      const objectClassResolution = objectClass && !isNonObjectClass
         ? resolveTarget(index, objectClass, EVENT_REFERENCE_KINDS)
         : undefined;
-      if (objectClass && !NON_OBJECT_CLASSES.has(objectClass.toLowerCase())) {
+      if (objectClass && !isNonObjectClass) {
         addRelationship(collector, source, 'object-reference', objectClass,
           objectClassResolution ?? { status: 'missing' },
           { ...entryLocation, jsonPath: `${entryPath}.objectClass` });
@@ -822,7 +833,7 @@ function extractEventSheetRelationships(
         addExpressionRelationships(parameterValue, source, index, memberships, collector, scope, {
           ...entryLocation,
           jsonPath: `${entryPath}.parameters.${parameterName}`,
-        }, objectClassResolution?.status === 'resolved' ? objectClassResolution.value : undefined);
+        }, functionsName, objectClassResolution?.status === 'resolved' ? objectClassResolution.value : undefined);
       }
     };
 
@@ -862,7 +873,11 @@ function extractEventSheetRelationships(
 }
 
 /** Emits only supported Construct relationships that resolve to exactly one indexed entity. */
-export function extractProjectRelationships(resources: readonly ParsedResource[], index: ProjectIndex): {
+export function extractProjectRelationships(
+  resources: readonly ParsedResource[],
+  index: ProjectIndex,
+  functionsName = 'Functions',
+): {
   readonly references: readonly ProjectReference[];
   readonly unresolvedReferences: readonly UnresolvedProjectReference[];
   readonly unsupportedExpressionCount: number;
@@ -877,7 +892,7 @@ export function extractProjectRelationships(resources: readonly ParsedResource[]
     extractFamilyRelationships(resource, index, collector);
     extractLayoutRelationships(resource, index, collector);
     extractStructureRelationships(resource, index, collector);
-    extractEventSheetRelationships(resource, index, collector, memberships);
+    extractEventSheetRelationships(resource, index, collector, memberships, functionsName);
   }
   const folders = index.byKind.get('projectFolder') ?? [];
   for (const folder of folders) {

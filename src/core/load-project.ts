@@ -61,7 +61,7 @@ export async function loadProject(filesystem: ProjectFileSystem, options?: Proje
   const index = createProjectIndex(entities);
 
   report(options, 'references');
-  const relationshipResult = extractProjectRelationships(loaded.resources, index);
+  const relationshipResult = extractProjectRelationships(loaded.resources, index, parsedManifest.manifest.functionsName);
   const references = relationshipResult.references;
   const referenceIndexes = createReferenceIndexes(references);
   const dependencies = createProjectDependencies(references);

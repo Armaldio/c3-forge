@@ -280,6 +280,7 @@ export function parseProjectManifestResult(input: unknown, rootName = 'Construct
   }
 
   const name = stringProperty(input, 'name', 'projectName', 'applicationName', 'title') ?? rootName;
+  const functionsName = stringProperty(input, 'functionsName');
   const rawVersion = input.constructVersion ?? input.savedWithRelease ?? input['construct-version'] ?? input['saved-version'];
   const constructVersion = typeof rawVersion === 'string' || (typeof rawVersion === 'number' && Number.isFinite(rawVersion))
     ? String(rawVersion)
@@ -288,6 +289,7 @@ export function parseProjectManifestResult(input: unknown, rootName = 'Construct
     projectFile: 'project.c3proj',
     name,
     ...(constructVersion ? { constructVersion } : {}),
+    ...(functionsName ? { functionsName } : {}),
     resources,
     folders,
     addons: parseAddons(input.usedAddons),
