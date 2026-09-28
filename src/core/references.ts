@@ -16,9 +16,10 @@ const RESERVED_NON_OBJECT_CLASSES = new Set(['system', 'function']);
 const EVENT_VARIABLE_PARAMETER_ACTIONS = new Set(['set-eventvar-value', 'add-to-eventvar']);
 const EVENT_VARIABLE_PARAMETER_CONDITIONS = new Set(['compare-eventvar']);
 const EXPRESSION_PARAMETER_NAMES = new Set(['count', 'expression', 'first-value', 'second-value', 'text', 'value']);
-// The checked-in real Construct corpus does not contain JPEG frame metadata to prove its image suffix.
+// Construct's Sprite frame fileType selects the image suffix; JPEG is verified against r495.00.
 const FRAME_IMAGE_EXTENSION_BY_TYPE: Readonly<Record<string, string>> = {
   'image/png': '.png',
+  'image/jpeg': '.jpg',
   'image/gif': '.gif',
   'image/bmp': '.bmp',
   'image/webp': '.webp',

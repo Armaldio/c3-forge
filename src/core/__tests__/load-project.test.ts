@@ -449,7 +449,7 @@ describe('Construct project core', () => {
       && reference.sourceLocation?.jsonPath === '$.animations.items[0].frames[0]')).toBe(false);
   });
 
-  it('does not guess a JPEG frame extension without real Construct serialization evidence', async () => {
+  it('maps JPEG Sprite frames to Construct’s serialized .jpg filename', async () => {
     const analysis = await loadProject(fixtureFileSystem('construct-platformer', (files) => {
       const objectPath = 'objectTypes/PlayerAnim.json';
       const source = files.get(objectPath);
@@ -459,11 +459,16 @@ describe('Construct project core', () => {
       };
       object.animations.items[0]!.frames[0]!.fileType = 'image/jpeg';
       files.set(objectPath, new TextEncoder().encode(JSON.stringify(object)));
+      const png = files.get('images/playeranim-walk-000.png');
+      if (!png) throw new Error('Missing fixture PNG');
+      files.set('images/playeranim-walk-000.jpg', png);
     }));
-
-    expect(analysis.references.some((reference) => reference.relationship === 'frame-image'
+    const frameReference = analysis.references.find((reference) => reference.relationship === 'frame-image'
       && analysis.index.byId.get(reference.sourceEntityId)?.sourcePath === 'objectTypes/PlayerAnim.json'
-      && reference.sourceLocation?.jsonPath === '$.animations.items[0].frames[0]')).toBe(false);
+      && reference.sourceLocation?.jsonPath === '$.animations.items[0].frames[0]');
+
+    expect(frameReference && analysis.index.byId.get(frameReference.targetEntityId)?.sourcePath)
+      .toBe('images/playeranim-walk-000.jpg');
     expect(analysis.unresolvedReferences.some((reference) => reference.relationship === 'frame-image'
       && reference.sourcePath === 'objectTypes/PlayerAnim.json'
       && reference.sourceLocation?.jsonPath === '$.animations.items[0].frames[0]')).toBe(false);
