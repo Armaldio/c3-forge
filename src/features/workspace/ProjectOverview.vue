@@ -15,9 +15,8 @@ const facts = computed(() => {
     { label: 'Event sheets', value: count('eventSheet') },
     { label: 'Objects', value: count('object') },
     { label: 'Families', value: count('family') },
-    { label: 'Relationship occurrences', value: props.analysis.stats.totalReferences },
-    { label: 'Dependency edges', value: props.analysis.stats.totalDependencies },
-    { label: 'Unresolved explicit targets', value: props.analysis.stats.totalUnresolvedReferences },
+    { label: 'Functions', value: count('function') },
+    { label: 'Variables', value: count('variable') },
   ]
 })
 </script>
@@ -51,10 +50,6 @@ const facts = computed(() => {
       >
         <dt>{{ fact.label }}</dt>
         <dd>{{ fact.value.toLocaleString() }}</dd>
-      </div>
-      <div class="overview-fact overview-fact-total">
-        <dt>Indexed entities</dt>
-        <dd>{{ analysis.stats.totalEntities.toLocaleString() }}</dd>
       </div>
     </dl>
   </section>

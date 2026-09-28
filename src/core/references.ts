@@ -16,6 +16,14 @@ const NON_OBJECT_CLASSES = new Set(['system', 'function', 'functions']);
 const EVENT_VARIABLE_PARAMETER_ACTIONS = new Set(['set-eventvar-value', 'add-to-eventvar']);
 const EVENT_VARIABLE_PARAMETER_CONDITIONS = new Set(['compare-eventvar']);
 const EXPRESSION_PARAMETER_NAMES = new Set(['count', 'expression', 'first-value', 'second-value', 'text', 'value']);
+const FRAME_IMAGE_EXTENSION_BY_TYPE: Readonly<Record<string, string>> = {
+  'image/png': '.png',
+  'image/gif': '.gif',
+  'image/bmp': '.bmp',
+  'image/webp': '.webp',
+  'image/avif': '.avif',
+  'image/svg+xml': '.svg',
+};
 const MAX_EXPRESSION_LENGTH = 16_384;
 const MAX_EXPRESSION_TOKENS = 512;
 interface RelationshipCollector {
@@ -37,11 +45,15 @@ type Resolution<T> =
   | { readonly status: 'ambiguous'; readonly candidates: readonly T[] };
 
 interface ExpressionReference {
-  readonly kind: 'identifier' | 'member' | 'function';
+  readonly kind: 'identifier' | 'member' | 'function' | 'behavior';
   readonly name: string;
   readonly owner?: string;
   readonly start: number;
   readonly end: number;
+  readonly ownerStart?: number;
+  readonly ownerEnd?: number;
+  readonly behaviorStart?: number;
+  readonly behaviorEnd?: number;
 }
 
 interface ExpressionToken {
@@ -53,9 +65,13 @@ interface ExpressionToken {
 
 type FamilyMemberships = ReadonlyMap<string, readonly ForgeEntity[]>;
 
+function nameKey(name: string): string {
+  return name.toLocaleLowerCase('en-US');
+}
+
 function targetCandidates(index: ProjectIndex, name: string, kinds?: readonly EntityKind[]): readonly ForgeEntity[] {
-  const all = index.byName.get(name.toLocaleLowerCase('en-US')) ?? [];
-  return all.filter((entity) => entity.name === name && (!kinds || kinds.includes(entity.kind)));
+  const all = index.byName.get(nameKey(name)) ?? [];
+  return all.filter((entity) => !kinds || kinds.includes(entity.kind));
 }
 
 function resolveTarget(index: ProjectIndex, name: string, kinds?: readonly EntityKind[]): Resolution<ForgeEntity> {
@@ -213,13 +229,18 @@ function resolveInstanceVariable(
 ): { readonly relationship: RelationshipKind; readonly resolution: Resolution<ForgeEntity> } {
   const candidates = targetCandidates(index, variableName, ['variable']).filter((entity) => {
     if (owner.kind === 'family') {
-      return entity.metadata.scope === 'family' && entity.metadata.familyName === owner.name;
+      return entity.metadata.scope === 'family'
+        && typeof entity.metadata.familyName === 'string'
+        && nameKey(entity.metadata.familyName) === nameKey(owner.name);
     }
     if (owner.kind !== 'object') return false;
-    if (entity.metadata.scope === 'object' && entity.metadata.objectName === owner.name) return true;
+    if (entity.metadata.scope === 'object'
+      && typeof entity.metadata.objectName === 'string'
+      && nameKey(entity.metadata.objectName) === nameKey(owner.name)) return true;
     const memberFamilies = memberships.get(owner.id) ?? [];
     return entity.metadata.scope === 'family'
-      && memberFamilies.some((family) => family.name === entity.metadata.familyName);
+      && typeof entity.metadata.familyName === 'string'
+      && memberFamilies.some((family) => nameKey(family.name) === nameKey(entity.metadata.familyName as string));
   });
   const resolution: Resolution<ForgeEntity> = candidates.length === 1
     ? { status: 'resolved', value: candidates[0] as ForgeEntity }
@@ -273,12 +294,25 @@ function tokenizeExpression(value: string): readonly ExpressionToken[] | undefin
       continue;
     }
 
+    if (character === '.' && /^\.\d+[A-Za-z_$]/.test(value.slice(index))) {
+      tokens.push({ kind: 'symbol', value: '.', start: index, end: index + 1 });
+      index += 1;
+      continue;
+    }
+
     if (/[0-9]/.test(character) || (character === '.' && /[0-9]/.test(value[index + 1] ?? ''))) {
       const start = index;
       const match = value.slice(index).match(/^(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?/);
-      if (!match) return undefined;
-      index += match[0].length;
-      tokens.push({ kind: 'number', value: match[0], start, end: index });
+      const nextCharacter = match ? value[index + match[0].length] : undefined;
+      if (match && (!nextCharacter || !/[A-Za-z_$]/.test(nextCharacter))) {
+        index += match[0].length;
+        tokens.push({ kind: 'number', value: match[0], start, end: index });
+        continue;
+      }
+      const digitStartedIdentifier = value.slice(index).match(/^\d+[A-Za-z_$][A-Za-z0-9_$]*/);
+      if (!digitStartedIdentifier) return undefined;
+      index += digitStartedIdentifier[0].length;
+      tokens.push({ kind: 'identifier', value: digitStartedIdentifier[0], start, end: index });
       continue;
     }
 
@@ -358,12 +392,38 @@ function parseExpression(value: string): readonly ExpressionReference[] | undefi
     }
     if (token.kind !== 'identifier') return false;
 
-    if (peek()?.value === '.') {
+    const isFunctionsObject = token.value.toLocaleLowerCase('en-US') === 'functions';
+    if (isFunctionsObject && peek()?.value === '.') {
       take();
       const member = take();
       if (!member || member.kind !== 'identifier') return false;
-      if (token.value === 'Functions') {
-        references.push({ kind: 'function', name: member.value, start: member.start, end: member.end });
+      references.push({ kind: 'function', name: member.value, start: member.start, end: member.end });
+      if (peek()?.value === '(' && !parseArguments()) return false;
+      return true;
+    }
+
+    if (peek()?.value === '(') {
+      if (!parseArguments()) return false;
+      const ownerEnd = tokens[position - 1]?.end ?? token.end;
+      if (peek()?.value !== '.') return true;
+      take();
+      const member = take();
+      if (!member || member.kind !== 'identifier') return false;
+      if (peek()?.value === '.') {
+        take();
+        const expression = take();
+        if (!expression || expression.kind !== 'identifier') return false;
+        references.push({
+          kind: 'behavior',
+          owner: token.value,
+          name: member.value,
+          start: expression.start,
+          end: expression.end,
+          ownerStart: token.start,
+          ownerEnd,
+          behaviorStart: member.start,
+          behaviorEnd: member.end,
+        });
         if (peek()?.value === '(' && !parseArguments()) return false;
         return true;
       }
@@ -373,11 +433,48 @@ function parseExpression(value: string): readonly ExpressionReference[] | undefi
         name: member.value,
         start: member.start,
         end: member.end,
+        ownerStart: token.start,
+        ownerEnd,
       });
+      if (peek()?.value === '(' && !parseArguments()) return false;
       return true;
     }
 
-    if (peek()?.value === '(') return parseArguments();
+    if (peek()?.value === '.') {
+      take();
+      const member = take();
+      if (!member || member.kind !== 'identifier') return false;
+      if (peek()?.value === '.') {
+        take();
+        const expression = take();
+        if (!expression || expression.kind !== 'identifier') return false;
+        references.push({
+          kind: 'behavior',
+          owner: token.value,
+          name: member.value,
+          start: expression.start,
+          end: expression.end,
+          ownerStart: token.start,
+          ownerEnd: token.end,
+          behaviorStart: member.start,
+          behaviorEnd: member.end,
+        });
+        if (peek()?.value === '(' && !parseArguments()) return false;
+        return true;
+      }
+      references.push({
+        kind: 'member',
+        owner: token.value,
+        name: member.value,
+        start: member.start,
+        end: member.end,
+        ownerStart: token.start,
+        ownerEnd: token.end,
+      });
+      if (peek()?.value === '(' && !parseArguments()) return false;
+      return true;
+    }
+
     references.push({ kind: 'identifier', name: token.value, start: token.start, end: token.end });
     return true;
   }
@@ -401,7 +498,25 @@ function parseExpression(value: string): readonly ExpressionReference[] | undefi
   }
 
   if (tokens.length === 0 || !parseBinary(0) || position !== tokens.length) return undefined;
-  return references;
+  return references.sort((left, right) => left.start - right.start || left.end - right.end);
+}
+
+function resolveBehavior(
+  index: ProjectIndex,
+  owner: Resolution<ForgeEntity>,
+  behaviorName: string,
+): Resolution<ForgeEntity> {
+  if (owner.status === 'missing') return { status: 'missing' };
+  if (owner.status === 'ambiguous') {
+    return { status: 'ambiguous', candidates: owner.candidates.flatMap((entity) =>
+      (index.byKind.get('behavior') ?? []).filter((behavior) =>
+        behavior.metadata.ownerEntityId === entity.id && nameKey(behavior.name) === nameKey(behaviorName))) };
+  }
+  const candidates = (index.byKind.get('behavior') ?? []).filter((behavior) =>
+    behavior.metadata.ownerEntityId === owner.value.id && nameKey(behavior.name) === nameKey(behaviorName));
+  if (candidates.length === 1) return { status: 'resolved', value: candidates[0] as ForgeEntity };
+  if (candidates.length > 1) return { status: 'ambiguous', candidates };
+  return { status: 'missing' };
 }
 
 function addExpressionRelationships(
@@ -435,8 +550,37 @@ function addExpressionRelationships(
       continue;
     }
 
+    if (occurrence.kind === 'behavior') {
+      const ownerName = occurrence.owner ?? '';
+      const selfOwner = nameKey(ownerName) === 'self';
+      const ownerResolution = selfOwner
+        ? expressionOwner ? { status: 'resolved' as const, value: expressionOwner } : { status: 'missing' as const }
+        : resolveTarget(index, ownerName, EVENT_REFERENCE_KINDS);
+      if (!selfOwner) {
+        addRelationship(collector, source, 'object-reference', ownerName, ownerResolution, {
+          ...sourceLocation,
+          expressionRange: {
+            start: occurrence.ownerStart ?? Math.max(0, occurrence.start - ownerName.length - 1),
+            end: occurrence.ownerEnd ?? Math.max(0, occurrence.start - 1),
+          },
+        });
+      }
+      const targetName = `${ownerName}.${occurrence.name}`;
+      const behaviorResolution = resolveBehavior(index, ownerResolution, occurrence.name);
+      if (!selfOwner || expressionOwner) {
+        addRelationship(collector, source, 'behavior-expression-reference', targetName, behaviorResolution, {
+          ...sourceLocation,
+          expressionRange: {
+            start: occurrence.behaviorStart ?? occurrence.start,
+            end: occurrence.behaviorEnd ?? occurrence.end,
+          },
+        });
+      }
+      continue;
+    }
+
     if (occurrence.kind === 'member') {
-      if (occurrence.owner === 'Self') {
+      if (nameKey(occurrence.owner ?? '') === 'self') {
         if (!expressionOwner) continue;
         const variable = resolveInstanceVariable(index, expressionOwner, occurrence.name, memberships);
         if (variable.resolution.status !== 'missing') {
@@ -445,12 +589,11 @@ function addExpressionRelationships(
         continue;
       }
       const ownerResolution = resolveTarget(index, occurrence.owner ?? '', EVENT_REFERENCE_KINDS);
-      if (ownerResolution.status === 'missing') continue;
       addRelationship(collector, source, 'object-reference', occurrence.owner ?? '', ownerResolution, {
         ...sourceLocation,
         expressionRange: {
-          start: Math.max(0, occurrence.start - (occurrence.owner?.length ?? 0) - 1),
-          end: occurrence.start - 1,
+          start: occurrence.ownerStart ?? Math.max(0, occurrence.start - (occurrence.owner?.length ?? 0) - 1),
+          end: occurrence.ownerEnd ?? occurrence.start - 1,
         },
       });
       if (ownerResolution.status !== 'resolved') continue;
@@ -529,10 +672,11 @@ function extractStructureRelationships(resource: ParsedResource, index: ProjectI
       const animationName = typeof frame.metadata.animationName === 'string' ? frame.metadata.animationName : undefined;
       const frameIndex = typeof frame.metadata.frameIndex === 'number' ? frame.metadata.frameIndex : undefined;
       const fileType = typeof frame.metadata.fileType === 'string' ? frame.metadata.fileType : undefined;
-      if (!animationName || frameIndex === undefined || fileType !== 'image/png'
+      const extension = fileType ? FRAME_IMAGE_EXTENSION_BY_TYPE[fileType] : undefined;
+      if (!animationName || frameIndex === undefined || !extension
         || !/^[a-z0-9 _-]+$/i.test(resource.entity.name)
         || !/^[a-z0-9 _-]+$/i.test(animationName)) continue;
-      const expectedPath = `images/${resource.entity.name.toLowerCase()}-${animationName.toLowerCase()}-${String(frameIndex).padStart(3, '0')}.png`;
+      const expectedPath = `images/${resource.entity.name.toLowerCase()}-${animationName.toLowerCase()}-${String(frameIndex).padStart(3, '0')}${extension}`;
       const matchingAssets = (index.bySourcePath.get(expectedPath) ?? []).filter((entity) => entity.kind === 'asset');
       const resolution: Resolution<ForgeEntity> = matchingAssets.length === 1
         ? { status: 'resolved', value: matchingAssets[0] as ForgeEntity }
@@ -565,7 +709,7 @@ function extractLayoutRelationships(resource: ParsedResource, index: ProjectInde
     const instancePath = typeof instance.metadata.jsonPath === 'string' ? instance.metadata.jsonPath : undefined;
     if (layer) addKnownRelationship(collector, layer, instance, 'layer-instance', instancePath ? { jsonPath: instancePath } : {});
     const type = typeof instance.metadata.objectType === 'string' ? instance.metadata.objectType : undefined;
-    if (type) addRelationship(collector, instance, 'layout-instance-type', type,
+    if (type) addRelationship(collector, resource.entity, 'layout-instance-type', type,
       resolveTarget(index, type, EVENT_REFERENCE_KINDS), instancePath ? { jsonPath: `${instancePath}.type` } : {});
   }
   if (typeof resource.raw.eventSheet === 'string') {
@@ -596,7 +740,7 @@ function extractEventSheetRelationships(
     const declaredFunctionCandidates = eventType === 'function-block'
       ? (index.byKind.get('function') ?? []).filter((entity) =>
           entity.sourcePath === resource.entity.sourcePath
-          && entity.name === node.functionName
+          && nameKey(entity.name) === nameKey(String(node.functionName ?? ''))
           && (sid === undefined || String(entity.metadata.sid) === sid))
       : [];
     const declaredFunction = declaredFunctionCandidates.length === 1 ? declaredFunctionCandidates[0] : undefined;

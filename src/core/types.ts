@@ -67,9 +67,16 @@ export const RELATIONSHIP_KINDS = [
   'event-variable-reference',
   'instance-variable-reference',
   'family-variable-reference',
+  'behavior-expression-reference',
 ] as const;
 
 export type RelationshipKind = typeof RELATIONSHIP_KINDS[number];
+
+export const FIRST_CLASS_ENTITY_KINDS = [
+  'object', 'family', 'layout', 'eventSheet', 'function', 'variable',
+] as const satisfies readonly EntityKind[];
+
+export type FirstClassEntityKind = typeof FIRST_CLASS_ENTITY_KINDS[number];
 
 export interface ReferenceSourceLocation {
   readonly eventSid?: string;

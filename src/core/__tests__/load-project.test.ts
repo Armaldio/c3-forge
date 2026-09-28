@@ -102,6 +102,37 @@ function fixtureFileSystem(
 }
 
 describe('Construct project core', () => {
+  it('resolves a unique case-insensitive file path from the Construct manifest', async () => {
+    const analysis = await loadProject(fixtureFileSystem('sample-project', (files) => {
+      const originalPath = 'objectTypes/Player.json';
+      const object = files.get(originalPath);
+      if (!object) throw new Error(`Missing fixture file: ${originalPath}`);
+      files.delete(originalPath);
+      files.set('objectTypes/player.json', object);
+    }));
+
+    expect(analysis.index.byKind.get('object')?.some((entity) => entity.name === 'Player')).toBe(true);
+    expect(analysis.diagnostics.some((diagnostic) => diagnostic.ruleId === 'resource.missing-resource'
+      && diagnostic.sourcePath === 'objectTypes/Player.json')).toBe(false);
+  });
+
+  it('does not choose between case-insensitive resource path collisions', async () => {
+    const analysis = await loadProject(fixtureFileSystem('sample-project', (files) => {
+      const originalPath = 'objectTypes/Player.json';
+      const object = files.get(originalPath);
+      if (!object) throw new Error(`Missing fixture file: ${originalPath}`);
+      files.delete(originalPath);
+      files.set('objectTypes/player.json', object);
+      files.set('objectTypes/PLAYER.json', object);
+    }));
+
+    expect(analysis.diagnostics).toContainEqual(expect.objectContaining({
+      ruleId: 'resource.ambiguous-resource-path',
+      sourcePath: 'objectTypes/Player.json',
+    }));
+    expect(analysis.index.byKind.get('object')?.some((entity) => entity.name === 'Player')).toBe(false);
+  });
+
   it('normalizes manifest resource trees, assets, addons, and paths', () => {
     const manifest = {
       name: 'Nested',
@@ -235,7 +266,7 @@ describe('Construct project core', () => {
   it('loads a licensed real Construct folder project without unresolved references', async () => {
     const analysis = await loadProject(fixtureFileSystem('construct-platformer'));
     expect({ entities: analysis.stats.totalEntities, references: analysis.stats.totalReferences, dependencies: analysis.stats.totalDependencies })
-      .toEqual({ entities: 154, references: 207, dependencies: 171 });
+      .toEqual({ entities: 154, references: 207, dependencies: 138 });
 
     expect(analysis.manifest.name).toBe('Platform abstraction');
     expect(analysis.manifest.constructVersion).toBe('44002');
@@ -289,6 +320,34 @@ describe('Construct project core', () => {
       targetName: 'images/playeranim-walk-000.png',
       resolution: 'missing',
     }));
+  });
+
+  it('maps a serialized WebP frame to its deterministically named image asset', async () => {
+    const analysis = await loadProject(fixtureFileSystem('construct-platformer', (files) => {
+      const objectPath = 'objectTypes/PlayerAnim.json';
+      const content = files.get(objectPath);
+      if (!content) throw new Error(`Missing fixture file: ${objectPath}`);
+      const object = JSON.parse(new TextDecoder().decode(content)) as {
+        animations: { items: { frames: { fileType: string }[] }[] };
+      };
+      object.animations.items[0]!.frames[0]!.fileType = 'image/webp';
+      files.set(objectPath, new TextEncoder().encode(JSON.stringify(object)));
+      const pngPath = 'images/playeranim-walk-000.png';
+      const image = files.get(pngPath);
+      if (!image) throw new Error(`Missing fixture image: ${pngPath}`);
+      files.delete(pngPath);
+      files.set('images/playeranim-walk-000.webp', image);
+    }));
+
+    expect(analysis.references).toContainEqual(expect.objectContaining({
+      relationship: 'frame-image',
+      targetEntityId: expect.any(String),
+      sourceLocation: { jsonPath: '$.animations.items[0].frames[0]' },
+    }));
+    const imageReference = analysis.references.find((reference) => reference.relationship === 'frame-image'
+      && reference.sourceLocation?.jsonPath === '$.animations.items[0].frames[0]');
+    expect(imageReference && analysis.index.byId.get(imageReference.targetEntityId)?.sourcePath)
+      .toBe('images/playeranim-walk-000.webp');
   });
 
   it('reports ambiguous function definition names instead of choosing one', async () => {

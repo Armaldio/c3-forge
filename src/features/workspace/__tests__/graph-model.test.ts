@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createProjectIndex } from '../../../core/project-index'
-import { buildGraphModel, type GraphEntityKind } from '../graph-model'
+import { buildGraphModel, graphKindsWithSelection, type GraphEntityKind } from '../graph-model'
 import type { ForgeEntity, ProjectAnalysis, ProjectDependency, RelationshipKind } from '../../../core/types'
 
 function entity(kind: ForgeEntity['kind'], name: string): ForgeEntity {
@@ -81,6 +81,33 @@ describe('relationship graph model', () => {
     expect(model.edges).toHaveLength(2)
     expect(model.edges[0]?.dependency.occurrenceIds).toHaveLength(2)
     expect(model.nodes.find((node) => node.entity.id === sheet.id)?.outgoing).toBe(1)
+    expect(model.nodes.find((node) => node.entity.id === spawn.id)?.incoming).toBe(1)
+    expect(model.edges[0]?.routeLane).toBe(0)
+  })
+
+  it('enables a selected filtered entity kind in focused graph mode', () => {
+    expect(graphKindsWithSelection(entityKinds, 'variable')).toContain('variable')
+    expect(graphKindsWithSelection([...entityKinds, 'variable'], 'variable')).toEqual([...entityKinds, 'variable'])
+    expect(graphKindsWithSelection(entityKinds, 'projectFile')).toContain('projectFile')
+  })
+
+  it('routes same-column dependency edges through separate deterministic lanes', () => {
+    const first = entity('function', 'First')
+    const second = entity('function', 'Second')
+    const third = entity('function', 'Third')
+    const fourth = entity('function', 'Fourth')
+    const model = buildGraphModel(analysis([first, second, third, fourth], [
+      dependency(first, second, 'function-call'),
+      dependency(third, fourth, 'function-call'),
+    ]), {
+      entityKinds: ['function'],
+      relationships: ['function-call'],
+      mode: 'project',
+      focusHops: 1,
+    })
+
+    expect(model.edges).toHaveLength(2)
+    expect(new Set(model.edges.map((edge) => edge.routeLane)).size).toBe(2)
   })
 
   it('limits focus mode to the selected one-hop or two-hop neighborhood', () => {

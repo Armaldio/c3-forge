@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import type { ProjectDiagnostic } from '../../../core/types'
-import { chooseRelationshipTab, summarizeProjectDiagnostics } from '../presentation'
+import { RELATIONSHIP_KINDS, type ProjectDiagnostic } from '../../../core/types'
+import {
+  chooseRelationshipTab,
+  defaultGraphRelationshipKinds,
+  referencesByRole,
+  RELATIONSHIP_PRESENTATION,
+  summarizeProjectDiagnostics,
+} from '../presentation'
 
 function diagnostic(severity: ProjectDiagnostic['severity']): ProjectDiagnostic {
   return {
@@ -90,5 +96,36 @@ describe('chooseRelationshipTab', () => {
   it('keeps the selected tab when neither direction has references', () => {
     expect(chooseRelationshipTab('incoming', 0, 0)).toBe('incoming')
     expect(chooseRelationshipTab('outgoing', 0, 0)).toBe('outgoing')
+  })
+})
+
+describe('relationship presentation metadata', () => {
+  it('classifies and labels every supported relationship exactly once', () => {
+    expect(Object.keys(RELATIONSHIP_PRESENTATION).sort()).toEqual([...RELATIONSHIP_KINDS].sort())
+    for (const relationship of RELATIONSHIP_KINDS) {
+      const metadata = RELATIONSHIP_PRESENTATION[relationship]
+      expect(metadata.label).not.toBe('')
+      expect(metadata.graphLabel).not.toBe('')
+      expect(['usage/dependency', 'structure/ownership', 'definition/resource']).toContain(metadata.role)
+      expect(typeof metadata.defaultGraphVisible).toBe('boolean')
+    }
+  })
+
+  it('keeps only usage/dependency occurrences in the Where is this used view', () => {
+    const references = [
+      { id: 'usage', sourceEntityId: 'sheet', targetEntityId: 'player', relationship: 'object-reference', sourcePath: 'eventSheets/Game.json' },
+      { id: 'structure', sourceEntityId: 'family', targetEntityId: 'player', relationship: 'family-member', sourcePath: 'families/Actors.json' },
+      { id: 'definition', sourceEntityId: 'event', targetEntityId: 'spawn', relationship: 'event-defines-function', sourcePath: 'eventSheets/Game.json' },
+    ] as const
+
+    expect(referencesByRole(references, 'usage/dependency').map((reference) => reference.id)).toEqual(['usage'])
+    expect(referencesByRole(references, 'structure/ownership').map((reference) => reference.id)).toEqual(['structure'])
+    expect(referencesByRole(references, 'definition/resource').map((reference) => reference.id)).toEqual(['definition'])
+  })
+
+  it('selects graph defaults from the same relationship registry', () => {
+    expect(defaultGraphRelationshipKinds).toContain('function-call')
+    expect(defaultGraphRelationshipKinds).toContain('object-reference')
+    expect(defaultGraphRelationshipKinds).not.toContain('event-child')
   })
 })

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
-import type { EntityKind, ForgeEntity, ProjectAnalysis } from '../../core/types'
+import { FIRST_CLASS_ENTITY_KINDS, type EntityKind, type ForgeEntity, type ProjectAnalysis } from '../../core/types'
 import { entityKindPluralLabel } from './presentation'
 
 const props = defineProps<{
@@ -15,10 +15,7 @@ const emit = defineEmits<{
 const explorerRoot = ref<HTMLElement | null>(null)
 
 const kindGroups: readonly { label: string; kinds: readonly EntityKind[] }[] = [
-  { label: 'Objects', kinds: ['object', 'family', 'behavior', 'animation', 'animationFrame'] },
-  { label: 'Scenes', kinds: ['layout', 'layoutLayer', 'layoutInstance', 'eventSheet', 'timeline', 'flowchart'] },
-  { label: 'Logic & data', kinds: ['function', 'variable', 'event'] },
-  { label: 'Project files', kinds: ['projectFolder', 'addon', 'asset', 'projectFile'] },
+  ...FIRST_CLASS_ENTITY_KINDS.map((kind) => ({ label: entityKindPluralLabel[kind], kinds: [kind] })),
 ]
 
 const groups = computed(() => kindGroups.map((group) => ({
@@ -30,6 +27,7 @@ const groups = computed(() => kindGroups.map((group) => ({
   })).filter((kindGroup) => kindGroup.entities.length > 0),
   entityCount: group.kinds.reduce((total, kind) => total + (props.analysis.index.byKind.get(kind)?.length ?? 0), 0),
 })).filter((group) => group.kinds.length > 0))
+const visibleEntityCount = computed(() => groups.value.reduce((total, group) => total + group.entityCount, 0))
 
 watch(() => props.selectedEntityId, async (selectedId) => {
   if (!selectedId) return
@@ -91,7 +89,7 @@ function entityLabel(entity: ForgeEntity): string {
           Explorer
         </h2>
       </div>
-      <span class="count-chip">{{ analysis.stats.totalEntities }}</span>
+      <span class="count-chip">{{ visibleEntityCount }}</span>
     </div>
 
     <p

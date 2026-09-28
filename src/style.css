@@ -701,6 +701,7 @@ code {
 .entity-kind-group summary:focus-visible,
 .occurrence-disclosure > summary:focus-visible,
 .uses-disclosure > summary:focus-visible,
+.structure-disclosure > summary:focus-visible,
 .technical-details-section > summary:focus-visible,
 .technical-occurrences > summary:focus-visible,
 .project-open-menu > summary:focus-visible {
@@ -1123,6 +1124,7 @@ code {
 
 .occurrence-disclosure > summary::-webkit-details-marker,
 .uses-disclosure > summary::-webkit-details-marker,
+.structure-disclosure > summary::-webkit-details-marker,
 .technical-details-section > summary::-webkit-details-marker,
 .technical-occurrences > summary::-webkit-details-marker {
   display: none;
@@ -1130,6 +1132,7 @@ code {
 
 .occurrence-disclosure > summary::before,
 .uses-disclosure > summary::before,
+.structure-disclosure > summary::before,
 .technical-details-section > summary::before,
 .technical-occurrences > summary::before {
   content: '›';
@@ -1141,6 +1144,7 @@ code {
 
 .occurrence-disclosure[open] > summary::before,
 .uses-disclosure[open] > summary::before,
+.structure-disclosure[open] > summary::before,
 .technical-details-section[open] > summary::before,
 .technical-occurrences[open] > summary::before {
   transform: rotate(90deg);
@@ -1168,6 +1172,7 @@ code {
 }
 
 .uses-disclosure,
+.structure-disclosure,
 .technical-details-section {
   margin-top: 20px;
   padding-top: 12px;
@@ -1175,6 +1180,7 @@ code {
 }
 
 .uses-disclosure > summary,
+.structure-disclosure > summary,
 .technical-details-section > summary {
   min-height: 28px;
   color: var(--text-muted);
@@ -1185,6 +1191,22 @@ code {
 .uses-disclosure > summary .entity-relationship-count {
   margin-left: auto;
   font-weight: 400;
+}
+
+.structure-disclosure > summary .entity-relationship-count {
+  margin-left: auto;
+  font-weight: 400;
+}
+
+.structure-group-section {
+  margin-top: 12px;
+}
+
+.structure-group-section > h3 {
+  margin: 0 0 5px;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 600;
 }
 
 .metadata-list {

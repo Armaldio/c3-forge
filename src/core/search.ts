@@ -1,4 +1,4 @@
-import type { EntityKind, ForgeEntity, ProjectIndex } from './types';
+import { FIRST_CLASS_ENTITY_KINDS, type EntityKind, type ForgeEntity, type ProjectIndex } from './types';
 
 export interface ParsedEntitySearch {
   readonly terms: readonly string[];
@@ -7,7 +7,8 @@ export interface ParsedEntitySearch {
 }
 
 const ENTITY_KIND_SET = new Set<EntityKind>([
-  'object', 'family', 'layout', 'eventSheet', 'timeline', 'flowchart', 'function', 'variable', 'addon', 'asset', 'projectFile',
+  'object', 'family', 'layout', 'eventSheet', 'timeline', 'flowchart', 'function', 'variable', 'addon', 'asset',
+  'layoutLayer', 'layoutInstance', 'event', 'behavior', 'animation', 'animationFrame', 'projectFolder', 'projectFile',
 ]);
 
 function isEntityKind(value: string): value is EntityKind {
@@ -74,10 +75,27 @@ function sheetMatches(entity: ForgeEntity, sheets: readonly string[]): boolean {
 export function searchEntities(index: ProjectIndex, query: string): readonly ForgeEntity[] {
   const parsed = parseEntitySearch(query);
   const allowedKinds = new Set(parsed.kinds);
-  return index.entities.filter((entity) => {
+  const matches = index.entities.filter((entity) => {
     if (allowedKinds.size > 0 && !allowedKinds.has(entity.kind)) return false;
     if (!sheetMatches(entity, parsed.sheets)) return false;
     const text = searchableText(entity);
     return parsed.terms.every((term) => text.includes(term));
   });
+  const firstClassRank: ReadonlyMap<EntityKind, number> = new Map(FIRST_CLASS_ENTITY_KINDS
+    .map((kind, position): [EntityKind, number] => [kind, position]));
+  const queryText = parsed.terms.join(' ');
+  const relevance = (entity: ForgeEntity): number => {
+    if (!queryText) return 0;
+    const name = entity.name.toLocaleLowerCase('en-US');
+    if (name === queryText) return 0;
+    if (name.startsWith(queryText)) return 1;
+    if (name.includes(queryText)) return 2;
+    return 3;
+  };
+  return matches.sort((left, right) =>
+    (firstClassRank.get(left.kind) ?? FIRST_CLASS_ENTITY_KINDS.length)
+      - (firstClassRank.get(right.kind) ?? FIRST_CLASS_ENTITY_KINDS.length)
+    || relevance(left) - relevance(right)
+    || left.name.localeCompare(right.name)
+    || left.sourcePath.localeCompare(right.sourcePath));
 }

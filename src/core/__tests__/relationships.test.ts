@@ -113,7 +113,7 @@ const cases: readonly RelationshipCase[] = [
 const structuralRelationships: readonly RelationshipKind[] = [
   'layout-layer', 'layer-child', 'layer-instance', 'event-sheet-event', 'event-child',
   'event-defines-function', 'behavior-attachment', 'object-animation', 'animation-frame',
-  'frame-image', 'folder-resource', 'folder-child',
+  'frame-image', 'folder-resource', 'folder-child', 'behavior-expression-reference',
 ]
 
 describe('supported relationship coverage', () => {
@@ -154,9 +154,7 @@ describe.each(cases)('$relationship', (testCase) => {
     const matches = result.references.filter((reference) => reference.relationship === testCase.relationship)
     expect(matches).toHaveLength(1)
     expect(matches[0]).toMatchObject({
-      ...(testCase.relationship === 'layout-instance-type'
-        ? { sourceEntityId: expect.stringContaining('layoutInstance:') }
-        : { sourceEntityId: result.source.id }),
+      sourceEntityId: result.source.id,
       targetEntityId: target.id,
       relationship: testCase.relationship,
     })
@@ -326,5 +324,142 @@ describe('strict expression and text boundaries', () => {
       relationship: 'family-variable-reference',
     }))
     expect(result.unresolvedReferences).toEqual([])
+  })
+
+  it('resolves Construct indexed object, behavior, family, function, and variable expressions', () => {
+    const source = createForgeEntity('eventSheet', 'Events', 'eventSheets/Events.json')
+    const player = createForgeEntity('object', 'Player', 'objectTypes/Player.json', { sid: 'player' })
+    const sprite = createForgeEntity('object', 'Sprite', 'objectTypes/Sprite.json', { sid: 'sprite' })
+    const actors = createForgeEntity('family', 'Actors', 'families/Actors.json', { sid: 'actors' })
+    const health = createForgeEntity('variable', 'Health', player.sourcePath, {
+      sid: 'health', scope: 'object', objectName: 'Player',
+    })
+    const team = createForgeEntity('variable', 'Team', actors.sourcePath, {
+      sid: 'team', scope: 'family', familyName: 'Actors',
+    })
+    const score = createForgeEntity('variable', 'Score', source.sourcePath, {
+      sid: 'score', scope: 'global',
+    })
+    const behavior = createForgeEntity('behavior', '8Direction', sprite.sourcePath, {
+      sid: 'eight-direction', behaviorId: '8Direction', ownerEntityId: sprite.id,
+    })
+    const functionEntity = createForgeEntity('function', 'AwardCoins', source.sourcePath, { sid: 'award-coins' })
+    const result = extractProjectRelationships([
+      resource('eventSheet', source, {
+        events: [{ sid: 42, actions: [{ id: 'set-value', objectClass: 'Player', parameters: {
+          expression: 'player.health + Self.Health + Sprite(0).X + sprite.8direction.Speed + actors.Team + functions.awardcoins(1) + score',
+        } }] }],
+      }),
+      resource('family', actors, { members: ['Player'] }),
+    ], createProjectIndex([source, player, sprite, actors, health, team, score, behavior, functionEntity]))
+
+    expect(result.references.map((reference) => reference.relationship).sort()).toEqual([
+      'family-member',
+      'object-reference', 'object-reference', 'object-reference', 'object-reference', 'object-reference',
+      'instance-variable-reference', 'instance-variable-reference',
+      'family-variable-reference', 'event-variable-reference', 'function-call', 'behavior-expression-reference',
+    ].sort())
+    expect(result.references.filter((reference) => reference.relationship === 'object-reference')
+      .map((reference) => reference.targetEntityId).sort())
+      .toEqual([actors.id, player.id, player.id, sprite.id, sprite.id].sort())
+    expect(result.references.filter((reference) => reference.relationship === 'instance-variable-reference'))
+      .toHaveLength(2)
+    expect(result.references.find((reference) => reference.relationship === 'family-variable-reference')?.targetEntityId)
+      .toBe(team.id)
+    expect(result.references.find((reference) => reference.relationship === 'event-variable-reference')?.targetEntityId)
+      .toBe(score.id)
+    expect(result.references.find((reference) => reference.relationship === 'function-call')?.targetEntityId)
+      .toBe(functionEntity.id)
+    expect(result.references.find((reference) => reference.relationship === 'behavior-expression-reference')?.targetEntityId)
+      .toBe(behavior.id)
+    expect(result.unresolvedReferences).toEqual([])
+  })
+
+  it('resolves Construct entity and variable names case-insensitively without hiding ambiguity', () => {
+    const source = createForgeEntity('eventSheet', 'Events', 'eventSheets/Events.json')
+    const player = createForgeEntity('object', 'Player', 'objectTypes/Player.json', { sid: 'player' })
+    const health = createForgeEntity('variable', 'Health', player.sourcePath, {
+      sid: 'health', scope: 'object', objectName: 'Player',
+    })
+    const result = extractProjectRelationships([resource('eventSheet', source, {
+      events: [{ sid: 43, actions: [{ id: 'set-value', objectClass: 'PLAYER', parameters: {
+        expression: 'player.health + Self.HEALTH',
+      } }] }],
+    })], createProjectIndex([source, player, health]))
+
+    expect(result.references.filter((reference) => reference.relationship === 'object-reference'))
+      .toMatchObject([{ targetEntityId: player.id }, { targetEntityId: player.id }])
+    expect(result.references.filter((reference) => reference.relationship === 'instance-variable-reference'))
+      .toHaveLength(2)
+    expect(result.unresolvedReferences).toEqual([])
+
+    const lowerCaseVariant = createForgeEntity('object', 'player', 'objectTypes/lower-player.json', { sid: 'lower-player' })
+    const ambiguous = extractProjectRelationships([resource('eventSheet', source, {
+      events: [{ sid: 44, actions: [{ id: 'set-value', parameters: { expression: 'PLAYER.X' } }] }],
+    })], createProjectIndex([source, player, lowerCaseVariant]))
+    expect(ambiguous.references.filter((reference) => reference.relationship === 'object-reference')).toEqual([])
+    expect(ambiguous.unresolvedReferences).toMatchObject([{
+      relationship: 'object-reference',
+      targetName: 'PLAYER',
+      resolution: 'ambiguous',
+      candidateEntityIds: [player.id, lowerCaseVariant.id],
+    }])
+  })
+
+  it('parses object expression calls and their nested variable arguments', () => {
+    const source = createForgeEntity('eventSheet', 'Events', 'eventSheets/Events.json')
+    const dictionary = createForgeEntity('object', 'Settings', 'objectTypes/Settings.json', { sid: 'settings' })
+    const key = createForgeEntity('variable', 'Key', source.sourcePath, { sid: 'key', scope: 'global' })
+    const result = extractProjectRelationships([resource('eventSheet', source, {
+      events: [{ sid: 47, actions: [{ id: 'set-value', parameters: {
+        expression: 'Settings.Get(Key) + "Player"',
+      } }] }],
+    })], createProjectIndex([source, dictionary, key]))
+
+    expect(result.references.map((reference) => [reference.relationship, reference.targetEntityId])).toEqual([
+      ['object-reference', dictionary.id],
+      ['event-variable-reference', key.id],
+    ])
+    expect(result.unresolvedReferences).toEqual([])
+    expect(result.unsupportedExpressionCount).toBe(0)
+  })
+
+  it('reports missing explicitly qualified object and behavior targets without creating edges', () => {
+    const source = createForgeEntity('eventSheet', 'Events', 'eventSheets/Events.json')
+    const sprite = createForgeEntity('object', 'Sprite', 'objectTypes/Sprite.json', { sid: 'sprite' })
+    const result = extractProjectRelationships([resource('eventSheet', source, {
+      events: [{ sid: 45, actions: [{ id: 'set-value', parameters: {
+        expression: 'Missing.Health + Sprite.8Direction.Speed',
+      } }] }],
+    })], createProjectIndex([source, sprite]))
+
+    expect(result.references).toMatchObject([{ relationship: 'object-reference', targetEntityId: sprite.id }])
+    expect(result.unresolvedReferences).toMatchObject([
+      { relationship: 'object-reference', targetName: 'Missing', resolution: 'missing' },
+      { relationship: 'behavior-expression-reference', targetName: 'Sprite.8Direction', resolution: 'missing' },
+    ])
+  })
+
+  it('reports ambiguous behavior names on a uniquely resolved owner', () => {
+    const source = createForgeEntity('eventSheet', 'Events', 'eventSheets/Events.json')
+    const sprite = createForgeEntity('object', 'Sprite', 'objectTypes/Sprite.json', { sid: 'sprite' })
+    const first = createForgeEntity('behavior', '8Direction', sprite.sourcePath, {
+      sid: 'movement-a', behaviorId: 'EightDirection', ownerEntityId: sprite.id,
+    })
+    const second = createForgeEntity('behavior', '8Direction', sprite.sourcePath, {
+      sid: 'movement-b', behaviorId: 'EightDirection', ownerEntityId: sprite.id,
+    })
+    const result = extractProjectRelationships([resource('eventSheet', source, {
+      events: [{ sid: 46, actions: [{ id: 'set-value', parameters: {
+        expression: 'Sprite.8Direction.Speed',
+      } }] }],
+    })], createProjectIndex([source, sprite, first, second]))
+
+    expect(result.unresolvedReferences).toContainEqual(expect.objectContaining({
+      relationship: 'behavior-expression-reference',
+      targetName: 'Sprite.8Direction',
+      resolution: 'ambiguous',
+      candidateEntityIds: [first.id, second.id],
+    }))
   })
 })

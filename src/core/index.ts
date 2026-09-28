@@ -5,13 +5,14 @@ export type { ManifestParseResult } from './manifest';
 export { createProjectIndex } from './project-index';
 export { createForgeEntity, entityFromResource, makeStableEntityId } from './entities';
 export { normalizeProjectPath, joinProjectPaths, resolveProjectPath, projectPathBasename, projectPathDirname } from './paths';
-export { RELATIONSHIP_KINDS } from './types';
+export { FIRST_CLASS_ENTITY_KINDS, RELATIONSHIP_KINDS } from './types';
 export type { ProjectFileSystem } from './filesystem';
 export type {
   AnalysisStats,
   DiagnosticSeverity,
   EntityIdentityConflict,
   EntityKind,
+  FirstClassEntityKind,
   ForgeEntity,
   JsonPrimitive,
   JsonValue,

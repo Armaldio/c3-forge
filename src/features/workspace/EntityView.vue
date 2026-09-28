@@ -1,7 +1,12 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { ForgeEntity, ProjectAnalysis, ProjectReference, RelationshipKind } from '../../core/types'
-import { entityKindLabel, formatMetadataValue } from './presentation'
+import {
+  entityKindLabel,
+  formatMetadataValue,
+  referencesByRole,
+  relationshipPresentation,
+} from './presentation'
 
 const props = defineProps<{
   analysis: ProjectAnalysis
@@ -26,13 +31,24 @@ interface RelatedEntityGroup {
 }
 
 const entity = computed(() => props.analysis.index.byId.get(props.selectedEntityId))
-const incomingReferences = computed(() => props.analysis.referencesByTarget.get(props.selectedEntityId) ?? [])
-const outgoingReferences = computed(() => props.analysis.referencesBySource.get(props.selectedEntityId) ?? [])
+const allIncomingReferences = computed(() => props.analysis.referencesByTarget.get(props.selectedEntityId) ?? [])
+const allOutgoingReferences = computed(() => props.analysis.referencesBySource.get(props.selectedEntityId) ?? [])
+const incomingReferences = computed(() => referencesByRole(allIncomingReferences.value, 'usage/dependency'))
+const outgoingReferences = computed(() => referencesByRole(allOutgoingReferences.value, 'usage/dependency'))
+const incomingStructureReferences = computed(() => allIncomingReferences.value.filter((reference) =>
+  relationshipPresentation(reference.relationship).role !== 'usage/dependency'))
+const outgoingStructureReferences = computed(() => allOutgoingReferences.value.filter((reference) =>
+  relationshipPresentation(reference.relationship).role !== 'usage/dependency'))
 const incomingGroups = computed(() => groupReferences(props.analysis, incomingReferences.value, 'sourceEntityId'))
 const outgoingGroups = computed(() => groupReferences(props.analysis, outgoingReferences.value, 'targetEntityId'))
+const incomingStructureGroups = computed(() => groupReferences(props.analysis, incomingStructureReferences.value, 'sourceEntityId'))
+const outgoingStructureGroups = computed(() => groupReferences(props.analysis, outgoingStructureReferences.value, 'targetEntityId'))
 const outgoingEntityCount = computed(() => new Set(outgoingReferences.value.map((reference) => reference.targetEntityId)).size)
+const outgoingStructureEntityCount = computed(() => new Set(outgoingStructureReferences.value.map((reference) => reference.targetEntityId)).size)
+const incomingStructureEntityCount = computed(() => new Set(incomingStructureReferences.value.map((reference) => reference.sourceEntityId)).size)
+const structureReferenceCount = computed(() => incomingStructureReferences.value.length + outgoingStructureReferences.value.length)
 const technicalReferences = computed(() => [...new Map(
-  [...incomingReferences.value, ...outgoingReferences.value].map((reference) => [reference.id, reference]),
+  [...allIncomingReferences.value, ...allOutgoingReferences.value].map((reference) => [reference.id, reference]),
 ).values()])
 const metadataRows = computed(() => Object.entries(entity.value?.metadata ?? {})
   .filter(([key]) => key !== 'sid')
@@ -58,7 +74,7 @@ function groupReferences(
   return [...related].map(([id, group]) => {
     const relationships = [...group.relationships].map(([relationship, occurrences]) => ({
       relationship,
-      label: relationshipLabel(relationship),
+      label: relationshipPresentation(relationship).label,
       references: occurrences,
     })).sort((left, right) => left.label.localeCompare(right.label))
     return {
@@ -71,30 +87,7 @@ function groupReferences(
 }
 
 function relationshipLabel(relationship: RelationshipKind): string {
-  const labels: Readonly<Record<RelationshipKind, string>> = {
-    'family-member': 'Family membership',
-    'layout-layer': 'Layout layer',
-    'layer-child': 'Nested layer',
-    'layer-instance': 'Layer instance',
-    'layout-instance-type': 'Instance object type',
-    'layout-event-sheet': 'Layout event sheet',
-    'event-sheet-event': 'Event sheet block',
-    'event-child': 'Nested event block',
-    'event-defines-function': 'Function definition',
-    'event-sheet-include': 'Included event sheet',
-    'behavior-attachment': 'Attached behavior',
-    'object-animation': 'Animation',
-    'animation-frame': 'Animation frame',
-    'frame-image': 'Frame image',
-    'folder-resource': 'Folder content',
-    'folder-child': 'Nested folder',
-    'object-reference': 'Object reference',
-    'function-call': 'Function call',
-    'event-variable-reference': 'Event variable',
-    'instance-variable-reference': 'Instance variable',
-    'family-variable-reference': 'Family variable',
-  }
-  return labels[relationship]
+  return relationshipPresentation(relationship).label
 }
 
 function occurrenceLabel(reference: ProjectReference): string {
@@ -206,7 +199,10 @@ function exactLocation(reference: ProjectReference): string {
         </ul>
       </section>
 
-      <details class="uses-disclosure">
+      <details
+        v-if="outgoingReferences.length > 0"
+        class="uses-disclosure"
+      >
         <summary>
           Uses {{ outgoingEntityCount }} {{ outgoingEntityCount === 1 ? 'entity' : 'entities' }}
           <span class="entity-relationship-count">{{ outgoingReferences.length }} occurrences</span>
@@ -260,6 +256,110 @@ function exactLocation(reference: ProjectReference): string {
             </ul>
           </li>
         </ul>
+      </details>
+
+      <details
+        v-if="structureReferenceCount > 0"
+        class="structure-disclosure"
+      >
+        <summary>
+          Structure
+          <span class="entity-relationship-count">{{ structureReferenceCount }} relationships</span>
+        </summary>
+        <section
+          v-if="incomingStructureGroups.length"
+          class="structure-group-section"
+          aria-label="Structure leading to this entity"
+        >
+          <h3>From {{ incomingStructureEntityCount }} {{ incomingStructureEntityCount === 1 ? 'entity' : 'entities' }}</h3>
+          <ul class="entity-relationship-groups">
+            <li
+              v-for="group in incomingStructureGroups"
+              :key="group.id"
+              class="entity-relationship-group"
+            >
+              <div class="entity-related-heading">
+                <button
+                  class="entity-related-link"
+                  type="button"
+                  @click="emit('select', group.entity.id)"
+                >
+                  {{ group.entity.name }}
+                </button>
+                <span class="kind-tag">{{ entityKindLabel[group.entity.kind] }}</span>
+                <span class="entity-relationship-count">{{ group.count }}</span>
+              </div>
+              <ul class="entity-relationship-kinds">
+                <li
+                  v-for="relationship in group.relationships"
+                  :key="relationship.relationship"
+                >
+                  <details class="occurrence-disclosure">
+                    <summary>
+                      <span>{{ relationship.label }}</span>
+                      <span class="entity-relationship-count">{{ relationship.references.length }}</span>
+                    </summary>
+                    <ul class="occurrence-list">
+                      <li
+                        v-for="reference in relationship.references"
+                        :key="reference.id"
+                      >
+                        {{ occurrenceLabel(reference) }}
+                      </li>
+                    </ul>
+                  </details>
+                </li>
+              </ul>
+            </li>
+          </ul>
+        </section>
+        <section
+          v-if="outgoingStructureGroups.length"
+          class="structure-group-section"
+          aria-label="Structure owned or defined by this entity"
+        >
+          <h3>To {{ outgoingStructureEntityCount }} {{ outgoingStructureEntityCount === 1 ? 'entity' : 'entities' }}</h3>
+          <ul class="entity-relationship-groups">
+            <li
+              v-for="group in outgoingStructureGroups"
+              :key="group.id"
+              class="entity-relationship-group"
+            >
+              <div class="entity-related-heading">
+                <button
+                  class="entity-related-link"
+                  type="button"
+                  @click="emit('select', group.entity.id)"
+                >
+                  {{ group.entity.name }}
+                </button>
+                <span class="kind-tag">{{ entityKindLabel[group.entity.kind] }}</span>
+                <span class="entity-relationship-count">{{ group.count }}</span>
+              </div>
+              <ul class="entity-relationship-kinds">
+                <li
+                  v-for="relationship in group.relationships"
+                  :key="relationship.relationship"
+                >
+                  <details class="occurrence-disclosure">
+                    <summary>
+                      <span>{{ relationship.label }}</span>
+                      <span class="entity-relationship-count">{{ relationship.references.length }}</span>
+                    </summary>
+                    <ul class="occurrence-list">
+                      <li
+                        v-for="reference in relationship.references"
+                        :key="reference.id"
+                      >
+                        {{ occurrenceLabel(reference) }}
+                      </li>
+                    </ul>
+                  </details>
+                </li>
+              </ul>
+            </li>
+          </ul>
+        </section>
       </details>
 
       <details class="technical-details-section">

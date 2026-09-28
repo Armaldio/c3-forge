@@ -27,6 +27,34 @@ interface ResourceReadResult {
   readonly issue?: ResourceIssue;
 }
 
+type ResourcePathMatch =
+  | { readonly status: 'resolved'; readonly path: string }
+  | { readonly status: 'missing' }
+  | { readonly status: 'ambiguous'; readonly paths: readonly string[] };
+
+/** Construct resource paths are case-insensitive; retain exact paths when available and reject collisions. */
+async function resolveCaseInsensitiveResourcePath(
+  filesystem: ProjectFileSystem,
+  requestedPath: string,
+): Promise<ResourcePathMatch> {
+  const segments = filesystem.normalizePath(requestedPath).split('/').filter(Boolean);
+  let parent = '';
+  for (let index = 0; index < segments.length; index += 1) {
+    const segment = segments[index] as string;
+    const finalSegment = index === segments.length - 1;
+    const entries = finalSegment
+      ? await filesystem.listFiles(parent)
+      : await filesystem.listDirectories(parent);
+    const matches = entries.filter((entry) => entry.split('/').at(-1)?.toLocaleLowerCase('en-US') === segment.toLocaleLowerCase('en-US'));
+    if (matches.length === 0) return { status: 'missing' };
+    if (matches.length > 1) return { status: 'ambiguous', paths: matches };
+    const match = matches[0] as string;
+    if (finalSegment) return { status: 'resolved', path: filesystem.normalizePath(match) };
+    parent = filesystem.normalizePath(match);
+  }
+  return { status: 'missing' };
+}
+
 async function mapWithConcurrency<T, R>(
   values: readonly T[],
   concurrency: number,
@@ -345,7 +373,19 @@ async function readOne(
 
   try {
     if (!(await filesystem.exists(path))) {
-      return { issue: { path, stage: 'read', code: 'missing-resource', message: `Manifest resource was not found: ${path}` } };
+      const caseInsensitiveMatch = await resolveCaseInsensitiveResourcePath(filesystem, path);
+      if (caseInsensitiveMatch.status === 'missing') {
+        return { issue: { path, stage: 'read', code: 'missing-resource', message: `Manifest resource was not found: ${path}` } };
+      }
+      if (caseInsensitiveMatch.status === 'ambiguous') {
+        return { issue: {
+          path,
+          stage: 'read',
+          code: 'ambiguous-resource-path',
+          message: `Manifest resource path ${path} matches multiple case-insensitive paths: ${caseInsensitiveMatch.paths.join(', ')}.`,
+        } };
+      }
+      path = caseInsensitiveMatch.path;
     }
     const descriptor = { ...resource, path };
     if (resource.kind === 'asset') return { input: { descriptor, path } };

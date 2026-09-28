@@ -1,13 +1,23 @@
-import { RELATIONSHIP_KINDS, type EntityKind, type ForgeEntity, type ProjectAnalysis, type ProjectDependency, type RelationshipKind } from '../../core/types'
+import {
+  FIRST_CLASS_ENTITY_KINDS,
+  RELATIONSHIP_KINDS,
+  type EntityKind,
+  type ForgeEntity,
+  type ProjectAnalysis,
+  type ProjectDependency,
+  type RelationshipKind,
+} from '../../core/types'
 
 export type GraphEntityKind = Extract<EntityKind,
   'eventSheet' | 'function' | 'object' | 'family' | 'layout' | 'variable' | 'layoutLayer'
-  | 'layoutInstance' | 'event' | 'behavior' | 'animation' | 'animationFrame' | 'asset' | 'projectFolder'>
+  | 'layoutInstance' | 'event' | 'behavior' | 'animation' | 'animationFrame' | 'asset'
+  | 'projectFolder' | 'timeline' | 'flowchart' | 'addon' | 'projectFile'>
 export type GraphMode = 'project' | 'focus'
 
 export const graphEntityKinds: readonly GraphEntityKind[] = [
   'eventSheet', 'function', 'object', 'family', 'layout', 'variable',
   'layoutLayer', 'layoutInstance', 'event', 'behavior', 'animation', 'animationFrame', 'asset', 'projectFolder',
+  'timeline', 'flowchart', 'addon', 'projectFile',
 ]
 
 export const graphRelationshipKinds: readonly RelationshipKind[] = RELATIONSHIP_KINDS
@@ -28,6 +38,7 @@ export interface GraphEdge {
   readonly dependency: ProjectDependency
   readonly source: ForgeEntity
   readonly target: ForgeEntity
+  readonly routeLane: number
 }
 
 export interface GraphModel {
@@ -45,6 +56,16 @@ export interface GraphModelOptions {
   readonly focusHops: 1 | 2
 }
 
+export function graphKindsWithSelection(
+  currentKinds: readonly GraphEntityKind[],
+  selectedKind: EntityKind | undefined,
+): readonly GraphEntityKind[] {
+  if (!selectedKind || !graphEntityKinds.includes(selectedKind as GraphEntityKind) || currentKinds.includes(selectedKind as GraphEntityKind)) {
+    return currentKinds
+  }
+  return [...currentKinds, selectedKind as GraphEntityKind]
+}
+
 const KIND_RANK: Readonly<Record<GraphEntityKind, number>> = {
   layout: 0,
   family: 0,
@@ -60,6 +81,10 @@ const KIND_RANK: Readonly<Record<GraphEntityKind, number>> = {
   animation: 2,
   animationFrame: 3,
   asset: 4,
+  timeline: 0,
+  flowchart: 0,
+  addon: 4,
+  projectFile: 4,
 }
 
 const NODE_WIDTH = 208
@@ -144,9 +169,18 @@ export function buildGraphModel(analysis: ProjectAnalysis, options: GraphModelOp
     .sort((left, right) => left.source.name.localeCompare(right.source.name)
       || left.target.name.localeCompare(right.target.name)
       || left.dependency.relationship.localeCompare(right.dependency.relationship))
+  const sameColumnCounts = new Map<number, number>()
+  const edgesWithLanes = includedEdges.map((edge) => {
+    const sourcePosition = positions.get(edge.source.id)
+    const targetPosition = positions.get(edge.target.id)
+    if (!sourcePosition || !targetPosition || sourcePosition.x !== targetPosition.x) return { ...edge, routeLane: 0 }
+    const routeLane = sameColumnCounts.get(sourcePosition.x) ?? 0
+    sameColumnCounts.set(sourcePosition.x, routeLane + 1)
+    return { ...edge, routeLane }
+  })
   const incomingCounts = new Map<string, number>()
   const outgoingCounts = new Map<string, number>()
-  for (const edge of includedEdges) {
+  for (const edge of edgesWithLanes) {
     incomingCounts.set(edge.target.id, (incomingCounts.get(edge.target.id) ?? 0) + 1)
     outgoingCounts.set(edge.source.id, (outgoingCounts.get(edge.source.id) ?? 0) + 1)
   }
@@ -159,11 +193,12 @@ export function buildGraphModel(analysis: ProjectAnalysis, options: GraphModelOp
   }))
   const maxRows = Math.max(1, ...[...lanes.values()].map((lane) => lane.length))
   const maxRank = Math.max(0, ...lanes.keys())
+  const maxRoutingLanes = Math.max(0, ...sameColumnCounts.values())
 
   return {
     nodes,
-    edges: includedEdges,
-    width: PADDING * 2 + (maxRank + 1) * NODE_WIDTH + maxRank * COLUMN_GAP,
+    edges: edgesWithLanes,
+    width: PADDING * 2 + (maxRank + 1) * NODE_WIDTH + maxRank * COLUMN_GAP + maxRoutingLanes * 20,
     height: PADDING * 2 + maxRows * NODE_HEIGHT + Math.max(0, maxRows - 1) * ROW_GAP,
   }
 }
@@ -179,4 +214,8 @@ export function graphFocusEntityId(analysis: ProjectAnalysis, allowedKinds: read
   }
   return [...scores].sort((left, right) => right[1] - left[1]
     || (analysis.index.byId.get(left[0])?.name ?? '').localeCompare(analysis.index.byId.get(right[0])?.name ?? ''))[0]?.[0]
+}
+
+export function firstClassEntityCount(analysis: ProjectAnalysis): number {
+  return FIRST_CLASS_ENTITY_KINDS.reduce((total, kind) => total + (analysis.stats.entitiesByKind[kind] ?? 0), 0)
 }

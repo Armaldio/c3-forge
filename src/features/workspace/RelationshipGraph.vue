@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import type { ProjectAnalysis, RelationshipKind } from '../../core/types'
-import { entityKindLabel } from './presentation'
+import { entityKindLabel, defaultGraphRelationshipKinds, relationshipPresentation } from './presentation'
 import {
   buildGraphModel,
+  firstClassEntityCount,
   graphEntityKinds,
   graphFocusEntityId,
+  graphKindsWithSelection,
   graphRelationshipKinds,
+  type GraphEdge,
   type GraphEntityKind,
   type GraphMode,
 } from './graph-model'
@@ -36,31 +39,15 @@ const entityFilters = reactive<Record<GraphEntityKind, boolean>>({
   animationFrame: false,
   asset: false,
   projectFolder: false,
+  timeline: false,
+  flowchart: false,
+  addon: false,
+  projectFile: false,
 })
 const relationshipFilters = reactive<Record<RelationshipKind, boolean>>({
-  'family-member': true,
-  'layout-layer': false,
-  'layer-child': false,
-  'layer-instance': false,
-  'layout-instance-type': false,
-  'layout-event-sheet': true,
-  'event-sheet-event': false,
-  'event-child': false,
-  'event-defines-function': false,
-  'event-sheet-include': true,
-  'behavior-attachment': false,
-  'object-animation': false,
-  'animation-frame': false,
-  'frame-image': false,
-  'folder-resource': false,
-  'folder-child': false,
-  'object-reference': true,
-  'function-call': true,
-  'event-variable-reference': true,
-  'instance-variable-reference': true,
-  'family-variable-reference': true,
-})
-const graphMode = ref<GraphMode>(props.selectedEntityId || props.analysis.stats.totalEntities > 150 ? 'focus' : 'project')
+  ...Object.fromEntries(graphRelationshipKinds.map((kind) => [kind, defaultGraphRelationshipKinds.includes(kind)])),
+} as Record<RelationshipKind, boolean>)
+const graphMode = ref<GraphMode>(props.selectedEntityId || firstClassEntityCount(props.analysis) > 100 ? 'focus' : 'project')
 const focusHops = ref<1 | 2>(1)
 const graphSelectedId = ref(props.selectedEntityId
   ?? graphFocusEntityId(props.analysis, DEFAULT_ENTITY_KINDS)
@@ -71,7 +58,10 @@ const pan = ref({ x: 0, y: 0 })
 const graphCanvas = ref<HTMLElement | null>(null)
 const dragOrigin = ref<{ pointerX: number; pointerY: number; panX: number; panY: number }>()
 
-if (props.analysis.index.byId.get(props.selectedEntityId ?? '')?.kind === 'variable') entityFilters.variable = true
+const initiallySelectedEntity = props.analysis.index.byId.get(props.selectedEntityId ?? '')
+if (initiallySelectedEntity && graphEntityKinds.includes(initiallySelectedEntity.kind as GraphEntityKind)) {
+  entityFilters[initiallySelectedEntity.kind as GraphEntityKind] = true
+}
 
 const selectedKinds = computed(() => graphEntityKinds.filter((kind) => entityFilters[kind]))
 const selectedRelationships = computed(() => graphRelationshipKinds.filter((kind) => relationshipFilters[kind]))
@@ -100,10 +90,10 @@ const selectedEntity = computed(() => graphSelectedId.value
   ? props.analysis.index.byId.get(graphSelectedId.value)
   : undefined)
 const selectedEntityIncoming = computed(() => selectedEntity.value
-  ? props.analysis.referencesByTarget.get(selectedEntity.value.id)?.length ?? 0
+  ? model.value.edges.filter((edge) => edge.target.id === selectedEntity.value?.id).length
   : 0)
 const selectedEntityOutgoing = computed(() => selectedEntity.value
-  ? props.analysis.referencesBySource.get(selectedEntity.value.id)?.length ?? 0
+  ? model.value.edges.filter((edge) => edge.source.id === selectedEntity.value?.id).length
   : 0)
 const filterCount = computed(() => selectedKinds.value.length + selectedRelationships.value.length)
 
@@ -112,8 +102,14 @@ watch(() => props.selectedEntityId, (entityId) => {
   graphSelectedId.value = entityId
   graphSelectionExplicit.value = true
   const entity = props.analysis.index.byId.get(entityId)
-  if (entity?.kind === 'variable') entityFilters.variable = true
+  if (entity) enableSelectedKind(entity.kind)
   graphMode.value = 'focus'
+})
+
+watch([graphMode, graphSelectedId, selectedKinds], () => {
+  if (graphMode.value !== 'focus') return
+  const entity = props.analysis.index.byId.get(graphSelectedId.value)
+  if (entity) enableSelectedKind(entity.kind)
 })
 
 watch(() => props.analysis, (analysis) => {
@@ -121,7 +117,7 @@ watch(() => props.analysis, (analysis) => {
     ?? graphFocusEntityId(analysis, DEFAULT_ENTITY_KINDS)
     ?? ''
   graphSelectionExplicit.value = Boolean(props.selectedEntityId)
-  graphMode.value = props.selectedEntityId || analysis.stats.totalEntities > 150 ? 'focus' : 'project'
+  graphMode.value = props.selectedEntityId || firstClassEntityCount(analysis) > 100 ? 'focus' : 'project'
   zoom.value = 1
   pan.value = { x: 0, y: 0 }
 })
@@ -131,40 +127,23 @@ function chooseNode(entityId: string): void {
   graphSelectionExplicit.value = true
 }
 
+function enableSelectedKind(kind: Parameters<typeof graphKindsWithSelection>[1]): void {
+  for (const selectedKind of graphKindsWithSelection(selectedKinds.value, kind)) {
+    entityFilters[selectedKind] = true
+  }
+}
+
 function openSelectedEntity(): void {
   if (selectedEntity.value) emit('open-entity', selectedEntity.value.id)
 }
 
 function relationshipLabel(relationship: RelationshipKind): string {
-  const labels: Readonly<Record<RelationshipKind, string>> = {
-    'family-member': 'member',
-    'layout-layer': 'layer',
-    'layer-child': 'contains layer',
-    'layer-instance': 'contains instance',
-    'layout-instance-type': 'instance of',
-    'layout-event-sheet': 'sheet',
-    'event-sheet-event': 'contains event',
-    'event-child': 'nested event',
-    'event-defines-function': 'defines',
-    'event-sheet-include': 'includes',
-    'behavior-attachment': 'has behavior',
-    'object-animation': 'has animation',
-    'animation-frame': 'has frame',
-    'frame-image': 'uses image',
-    'folder-resource': 'contains',
-    'folder-child': 'contains folder',
-    'object-reference': 'uses',
-    'function-call': 'calls',
-    'event-variable-reference': 'uses variable',
-    'instance-variable-reference': 'uses instance variable',
-    'family-variable-reference': 'uses family variable',
-  }
-  return labels[relationship]
+  return relationshipPresentation(relationship).graphLabel
 }
 
-function edgePath(sourceId: string, targetId: string): string {
-  const source = graphPositions.value.get(sourceId)
-  const target = graphPositions.value.get(targetId)
+function edgePath(edge: GraphEdge): string {
+  const source = graphPositions.value.get(edge.source.id)
+  const target = graphPositions.value.get(edge.target.id)
   if (!source || !target) return ''
   const nodeWidth = 208
   const nodeHeight = 70
@@ -175,7 +154,7 @@ function edgePath(sourceId: string, targetId: string): string {
     const direction = targetCenterY >= sourceCenterY ? 1 : -1
     const sourceY = source.y + (direction > 0 ? nodeHeight : 0)
     const targetY = target.y + (direction > 0 ? 0 : nodeHeight)
-    const side = source.x + nodeWidth + 54
+    const side = source.x + nodeWidth + 44 + edge.routeLane * 20
     return `M ${source.x + nodeWidth} ${sourceY} C ${side} ${sourceY}, ${side} ${targetY}, ${target.x + nodeWidth} ${targetY}`
   }
 
@@ -186,10 +165,16 @@ function edgePath(sourceId: string, targetId: string): string {
   return `M ${startX} ${sourceCenterY} C ${middleX} ${sourceCenterY}, ${middleX} ${targetCenterY}, ${endX} ${targetCenterY}`
 }
 
-function edgeMidpoint(sourceId: string, targetId: string): { x: number; y: number } {
-  const source = graphPositions.value.get(sourceId)
-  const target = graphPositions.value.get(targetId)
+function edgeMidpoint(edge: GraphEdge): { x: number; y: number } {
+  const source = graphPositions.value.get(edge.source.id)
+  const target = graphPositions.value.get(edge.target.id)
   if (!source || !target) return { x: 0, y: 0 }
+  if (source.x === target.x) {
+    return {
+      x: source.x + 208 + 48 + edge.routeLane * 20,
+      y: (source.y + target.y + 70) / 2 - 12,
+    }
+  }
   return { x: (source.x + target.x + 208) / 2, y: (source.y + target.y + 70) / 2 - 12 }
 }
 
@@ -440,12 +425,12 @@ function setProjectMode(): void {
                 }"
               >
                 <path
-                  :d="edgePath(edge.source.id, edge.target.id)"
+                  :d="edgePath(edge)"
                   marker-end="url(#graph-arrow)"
                 />
                 <text
-                  :x="edgeMidpoint(edge.source.id, edge.target.id).x"
-                  :y="edgeMidpoint(edge.source.id, edge.target.id).y"
+                  :x="edgeMidpoint(edge).x"
+                  :y="edgeMidpoint(edge).y"
                   class="graph-edge-label"
                 >{{ relationshipLabel(edge.dependency.relationship) }} ×{{ edge.dependency.occurrenceIds.length }}</text>
               </g>
@@ -463,7 +448,7 @@ function setProjectMode(): void {
                 :data-node-id="node.entity.id"
                 role="button"
                 tabindex="0"
-                :aria-label="`${node.entity.name}, ${entityKindLabel[node.entity.kind]}, used by ${node.incoming} edges, uses ${node.outgoing} edges`"
+                :aria-label="`${node.entity.name}, ${entityKindLabel[node.entity.kind]}, ${node.incoming} incoming dependency edges, ${node.outgoing} outgoing dependency edges`"
                 @pointerdown.stop
                 @click.stop="chooseNode(node.entity.id)"
                 @dblclick.stop="graphSelectedId = node.entity.id; openSelectedEntity()"
@@ -489,7 +474,7 @@ function setProjectMode(): void {
                   x="195"
                   y="25"
                   class="graph-node-degree"
-                >{{ node.incoming }} / {{ node.outgoing }}</text>
+                >↓{{ node.incoming }} ↑{{ node.outgoing }}</text>
               </g>
             </g>
           </g>
@@ -518,8 +503,8 @@ function setProjectMode(): void {
         <h2>{{ selectedEntity.name }}</h2>
         <span class="kind-tag">{{ entityKindLabel[selectedEntity.kind] }}</span>
         <dl>
-          <div><dt>Used by</dt><dd>{{ selectedEntityIncoming }}</dd></div>
-          <div><dt>Uses</dt><dd>{{ selectedEntityOutgoing }}</dd></div>
+          <div><dt>Incoming edges</dt><dd>{{ selectedEntityIncoming }}</dd></div>
+          <div><dt>Outgoing edges</dt><dd>{{ selectedEntityOutgoing }}</dd></div>
         </dl>
         <button
           type="button"
@@ -532,7 +517,7 @@ function setProjectMode(): void {
     </div>
 
     <p class="graph-pan-hint">
-      Edges are aggregated from resolved occurrences. Select a node to highlight direct relationships; drag to pan.
+      Node numbers show incoming/outgoing dependency edges; edge labels show occurrence counts. Drag to pan.
     </p>
   </section>
 </template>
