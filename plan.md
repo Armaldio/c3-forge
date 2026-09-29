@@ -1,137 +1,220 @@
-Goal: Make the information architecture obvious:
+Goal: Make the visual hierarchy match the navigation model already implemented.
 
-**Project = semantic exploration. Graph = contextual project/entity view. Resources = separate global workspace.**
+The state/router work is mostly correct. This pass should only fix **composition, placement, and clarity**.
 
-### WORKSPACE HIERARCHY
+### TOP-LEVEL WORKSPACE NAV
 
-☐ Replace the current top-level:
+☐ Move `← → Project | Resources` **above** `.workspace-layout`.
 
-`Project | Graph | Resources`
+Current:
 
-with:
-
-`Project | Resources`
-
-☐ Inside **Project**, show contextual secondary tabs.
-
-Project root:
-
-`Overview | Graph`
-
-Entity selected:
-
-`Details | Graph`
-
-☐ Graph stays inside Project because it can represent either:
-- the whole project
-- one focused entity
-
-☐ Resources is never presented as part of entity details or Project sub-tabs.
-
----
-
-### NAVIGATION STATE
-
-☐ Replace the current navigation model with:
-
-```ts
-type NavigationEntry =
-  | {
-      workspace: 'project'
-      entityId: string | null
-      view: 'details' | 'graph'
-    }
-  | {
-      workspace: 'resources'
-      resourcePath: string | null
-    }
+```text
+Explorer | ← → Project | Resources
+         | Details | Graph
 ```
 
-☐ Interpret `project + entityId:null + details` as Project Overview.
+Target:
 
-☐ `project + entityId + graph` opens a graph focused on that entity.
+```text
+← →   Project   Resources
+──────────────────────────
 
-☐ Keep local entity IDs/resource paths in `history.state`, never in URLs.
+Project workspace content
+```
+
+☐ Top-level workspace navigation must span the full workspace width.
+
+☐ It must stay in the same horizontal position when switching between Project and Resources.
+
+☐ Keep:
+- Back
+- Forward
+- Project
+- Resources
+
+☐ Do not put this navigation inside `.main-column`.
 
 ---
 
 ### PROJECT WORKSPACE
 
-☐ Keep the Explorer visible throughout Project workspace.
+☐ Render Project as its own layout branch:
 
-☐ Keep the flattened sidebar:
+```text
+Project
+├─ Explorer
+└─ Main pane
+```
 
-- Objects
-- Families
-- Layouts
-- Event sheets
-- Functions
-- Variables
-- Timelines
-- Flowcharts
+☐ Explorer remains visible for:
+- Project Overview
+- Entity Details
+- Project Graph
+- Entity Graph
 
-☐ No duplicate nesting such as `Layouts → Layouts`.
+☐ Inside Project main pane, keep contextual tabs only:
 
-☐ Search/entity navigation must:
-- select entity
-- reveal its section
-- scroll it into view
-- highlight it
+Project root:
 
-☐ Add/keep breadcrumb:
+```text
+Overview | Graph
+```
 
-`Project › Game Events › SpawnEnemy`
+Entity selected:
 
-☐ Clicking `Project` returns to Project Overview and creates history.
+```text
+Details | Graph
+```
 
----
+☐ These tabs belong inside the Project main pane, not at app/workspace level.
 
-### ENTITY DETAILS
+☐ Keep entity breadcrumb:
 
-☐ Entity page remains semantic only.
+```text
+Project › Game Events › SpawnEnemy
+```
 
-Keep:
-- Where is this used?
-- Uses …
-- Structure
-- Technical details
-
-☐ Do not add:
-- resources
-- image previews
-- asset lists
-- resource counts
-
-☐ Entity Graph tab automatically focuses the selected entity.
+☐ Clicking `Project` returns to Project Overview.
 
 ---
 
-### GRAPH
+### RESOURCES WORKSPACE
 
-☐ Project root Graph = project architecture graph.
+☐ Resources must be a sibling of Project, not a modified Project layout.
 
-☐ Entity Graph = focused graph for that entity.
+Do not do:
 
-☐ Opening an entity from Graph switches to its Details view.
+```text
+workspace-layout
+└─ hide Explorer
+└─ stretch main-column
+```
 
-☐ Back returns to the exact previous Graph state.
+Instead do:
 
-☐ Keep Focus mode and 1/2-hop controls.
+```vue
+<WorkspaceNavigation />
 
-☐ Keep same-column lane reuse for non-overlapping edges.
+<ProjectWorkspaceLayout v-if="workspace === 'project'" />
 
-☐ Keep gutter width based on concurrently active lanes.
+<ResourcesWorkspace v-else />
+```
+
+☐ Resources gets the full content width.
+
+☐ No Entity Explorer.
+
+☐ No `Overview | Graph`.
+
+☐ No entity breadcrumb.
+
+☐ No entity-related title/state leaking into Resources.
+
+☐ Keep only:
+
+```text
+Resources
+├─ resource browser
+└─ preview
+```
 
 ---
 
-### GLOBAL RESOURCES WORKSPACE
+### COMPONENT STRUCTURE
 
-☐ Resources replaces the entire Project workspace when active.
+☐ Refactor `ProjectWorkspace.vue` composition roughly into:
 
-☐ Hide Entity Explorer while in Resources.
+```text
+Forge shell
+├─ Header
+├─ Search/Open toolbar
+├─ Workspace navigation
+│  └─ Back / Forward / Project / Resources
+│
+├─ Project branch
+│  ├─ EntityExplorer
+│  └─ ProjectMainPane
+│     ├─ Overview | Graph
+│     └─ Details | Graph
+│
+├─ Resources branch
+│  └─ ResourcesView
+│
+├─ Status bar
+└─ Diagnostics drawer
+```
 
-☐ Resources has its own browser + preview:
+☐ No need to rewrite router/navigation state.
 
+☐ Reuse the existing:
+
+```ts
+workspace: 'project' | 'resources'
+view: 'details' | 'graph'
+```
+
+model.
+
+---
+
+### VISUAL HIERARCHY
+
+☐ Make top-level workspace navigation visually stronger than contextual tabs.
+
+Suggested hierarchy:
+
+```text
+Project   Resources        ← primary
+Details   Graph            ← secondary
+```
+
+☐ Primary tabs:
+- taller
+- stronger active state
+- full-workspace placement
+
+☐ Secondary tabs:
+- smaller
+- only visible inside Project
+- clearly attached to current Project/entity context
+
+☐ Avoid two identical-looking tab strips stacked together.
+
+---
+
+### PROJECT TITLE / CONTEXT
+
+☐ Top-level workspace row should not show entity details as if they were workspace names.
+
+Prefer:
+
+```text
+← →   Project   Resources
+```
+
+Then Project main pane owns:
+
+```text
+Player
+Details | Graph
+```
+
+or:
+
+```text
+Project overview
+Overview | Graph
+```
+
+☐ Avoid duplicating entity/project names in both navigation bars.
+
+---
+
+### RESOURCES CONTENT
+
+☐ Keep Resources global.
+
+☐ Keep groups:
 - Images
 - Audio
 - Fonts
@@ -141,112 +224,151 @@ Keep:
 - Project source files
 - Add-ons
 
-☐ Resource selection is global, never tied to an object/entity.
+☐ Keep resource preview/history exactly as implemented.
 
-☐ Resource → resource navigation creates history.
+☐ Keep source-file classification from real manifest resources.
 
-☐ Back/Forward restores the exact selected resource.
+☐ Generic `.json` assets remain `Other files`.
 
-☐ Keep previews lazy and read-only.
-
-☐ Keep preview limits and revoke object URLs when changing resource/leaving Resources.
+☐ Do not add resources to Entity Details.
 
 ---
 
-### PROJECT SOURCE FILES
+### GRAPH
 
-☐ Build `Project source files` from real Construct manifest resources.
+☐ Keep Graph inside Project.
 
-Use:
-- `project.c3proj`
-- object type JSON
-- layout JSON
-- event sheet JSON
-- timeline JSON
-- flowchart JSON
-- other serialized Construct project resources
+☐ Project Graph:
+- `entityId = null`
+- architecture/project graph
 
-☐ Do not rely on fake `projectFile` entities for those files.
+☐ Entity Graph:
+- same selected `entityId`
+- focused graph
 
-☐ Do not classify every `.json` file as Construct source.
+☐ Explorer remains visible in both Graph modes.
 
-Example:
+☐ Opening entity from Graph switches to:
 
 ```text
-objectTypes/Player.json → Project source files
-eventSheets/Game.json   → Project source files
-
-files/config.json       → Other files
-files/data.json         → Other files
+Project
+entityId = selected
+view = details
 ```
 
-☐ Classification must use resource origin/context, not extension alone.
+☐ Back restores previous Graph state.
 
 ---
 
-### HISTORY
+### ARIA / STRUCTURE FIXES
 
-☐ Test this complete flow:
+☐ Fix Resources panel label mismatch.
+
+Current tab ID:
 
 ```text
-Project Overview
-→ Player Details
-→ Player Graph
-→ Game Events Details
-→ Resources
-→ player.png
-→ background.png
+workspace-tab-resources-workspace
 ```
 
-☐ Back/Forward must restore every state exactly.
+Panel must reference that exact ID.
 
-☐ New navigation after Back clears the forward branch.
+☐ Do not make top-level `Project` tab `aria-controls` only the Details panel.
 
-☐ Do not create history entries for:
-- sidebar expansion
-- zoom/pan
-- opening disclosures
-- graph filter menu
+Either:
+- point it to the Project workspace container, or
+- model top-level workspace switching as normal navigation instead of nested tab semantics.
+
+☐ Keep `Overview/Details | Graph` as the actual Project tablist.
+
+☐ Ensure every `aria-labelledby` references an existing element.
 
 ---
 
-### CLEANUP
+### CSS
 
-☐ Keep renamed `functionsName` support.
+☐ Remove layout dependency on:
 
-☐ Keep deterministic JPEG frame mapping.
+```css
+.workspace-layout--resources {
+  grid-template-columns: 1fr;
+}
+```
 
-☐ Keep Timeline/Flowchart first-class.
+Resources should not be a special Project grid mode.
 
-☐ Keep exact resource path first, then one unique case-insensitive compatibility match.
+☐ Introduce clear containers such as:
 
-☐ Keep the corrected resource-path comment.
+```text
+.workspace-navigation
+.project-workspace-layout
+.resources-workspace
+.project-main
+.project-context-tabs
+```
 
-☐ Preserve the **no guessing** relationship rule.
+☐ Keep responsive behavior.
+
+On narrow screens:
+
+```text
+Project / Resources
+Explorer
+Project content
+```
+
+or, for Resources:
+
+```text
+Project / Resources
+Resource browser
+Preview
+```
+
+---
+
+### DO NOT TOUCH
+
+☐ Navigation state model.
+
+☐ Vue Router history implementation.
+
+☐ Saved-project restoration.
+
+☐ Resource history.
+
+☐ Relationship extraction.
+
+☐ No-guessing semantics.
+
+☐ Graph routing algorithm.
+
+☐ Resource classification logic.
+
+This should be a **UI composition pass**, not another architecture rewrite.
 
 ---
 
 ### TESTS
 
-☐ Project Overview ↔ entity Details.
+☐ Project/Resources navigation exists outside Project main pane.
 
-☐ Details ↔ focused Graph.
+☐ Switching Project → Resources does not move primary nav horizontally.
 
-☐ Graph → entity → Back restores Graph.
+☐ Explorer exists only in Project.
 
-☐ Project ↔ Resources.
+☐ Explorer stays visible in Project Graph.
 
-☐ Resource → resource → Back/Forward.
+☐ Resources renders without Project contextual tabs.
 
-☐ Resources never inherits entity selection.
+☐ Project root shows `Overview | Graph`.
 
-☐ Project source files come from real manifest resources.
+☐ Entity shows `Details | Graph`.
 
-☐ Generic JSON assets stay regular resources.
+☐ Resources has no entity breadcrumb/details context.
 
-☐ Sidebar stays flat.
+☐ All tab/panel ARIA IDs match.
 
-☐ URL contains no project/entity/resource data.
+☐ Back/Forward behavior remains unchanged.
 
 ☐ Run:
 
@@ -257,19 +379,38 @@ pnpm test
 pnpm build
 ```
 
-### FINAL STRUCTURE
+### FINAL TARGET
 
 ```text
-C3 Forge
-├─ Project
-│  ├─ Explorer
-│  └─ Overview / Details / contextual Graph
-│
-└─ Resources
-   └─ Global resource browser + preview
+C3 FORGE
+
+Search / Open
+
+← →   Project   Resources
+────────────────────────────────────────
+
+PROJECT:
+
+Explorer │ Player
+         │ Details   Graph
+         │ ─────────────────────────────
+         │ Where is this used?
+         │ ...
+
+RESOURCES:
+
+Resources
+┌────────────────────┬──────────────────┐
+│ Files              │ Preview          │
+└────────────────────┴──────────────────┘
 ```
 
-☐ Project explains semantic structure.  
-☐ Graph visualizes the current Project context.  
-☐ Resources inspects global project files/assets.  
-☐ The three responsibilities no longer overlap.
+☐ Primary workspace hierarchy is visually obvious.
+
+☐ Graph remains contextual to Project/entity.
+
+☐ Resources is clearly global.
+
+☐ No UI element suggests Resources belongs to entity details.
+
+☐ No state/router rewrite.
