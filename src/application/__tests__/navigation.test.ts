@@ -1,130 +1,132 @@
+import { createMemoryHistory } from 'vue-router'
 import { describe, expect, it } from 'vitest'
 import {
-  backNavigation,
-  canBack,
-  canForward,
-  currentNavigationEntry,
-  forwardNavigation,
-  initNavigationHistory,
-  projectEntryForView,
+  canNavigateBackFromHistoryState,
+  canNavigateForwardFromHistoryState,
+  forgeNavigationStateFromHistoryState,
+  navigationLocationForEntry,
   projectOverviewEntry,
-  pushNavigation,
   resourceWorkspaceEntry,
+  sameNavigationEntry,
   type NavigationEntry,
 } from '../navigation'
+import { createForgeRouter } from '../router'
 
-const overview = (): NavigationEntry => projectOverviewEntry()
-const details = (entityId: string): NavigationEntry => ({ workspace: 'project', entityId, view: 'details' })
-const graph = (entityId: string | null): NavigationEntry => ({ workspace: 'project', entityId, view: 'graph' })
-const resources = (resourcePath: string | null): NavigationEntry => ({ workspace: 'resources', resourcePath })
+function currentForgeState(router: ReturnType<typeof createForgeRouter>) {
+  return forgeNavigationStateFromHistoryState(router.options.history.state)
+}
 
-describe('navigation history', () => {
-  it('starts at Project Overview', () => {
-    const history = initNavigationHistory(overview())
+async function pushEntry(
+  router: ReturnType<typeof createForgeRouter>,
+  entry: NavigationEntry,
+  token: string,
+  canGoBack = true,
+): Promise<void> {
+  await router.push(navigationLocationForEntry(entry, token, {
+    projectSessionId: 'project-session',
+    canGoBack,
+  }))
+}
 
-    expect(history).toEqual({ entries: [overview()], index: 0 })
-    expect(currentNavigationEntry(history)).toEqual(overview())
-    expect(canBack(history)).toBe(false)
-    expect(canForward(history)).toBe(false)
+async function settleHistoryNavigation(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 0))
+}
+
+describe('Vue Router navigation state', () => {
+  it('keeps project and resource data in namespaced history state and URLs opaque', async () => {
+    const router = createForgeRouter(createMemoryHistory())
+    await pushEntry(router, { workspace: 'project', entityId: 'object:sid:Player-17', view: 'details' }, 'opaque-1')
+
+    expect(router.currentRoute.value.fullPath).toBe('/workspace/project/opaque-1')
+    expect(router.currentRoute.value.fullPath).not.toContain('Player')
+    expect(router.currentRoute.value.fullPath).not.toContain('sid')
+    expect(currentForgeState(router)?.entry).toEqual({
+      workspace: 'project', entityId: 'object:sid:Player-17', view: 'details',
+    })
+
+    await pushEntry(router, { workspace: 'resources', resourcePath: 'images/player.png' }, 'opaque-2')
+    expect(router.currentRoute.value.fullPath).toBe('/workspace/resources/opaque-2')
+    expect(router.currentRoute.value.fullPath).not.toContain('images')
+    expect(currentForgeState(router)?.entry).toEqual({ workspace: 'resources', resourcePath: 'images/player.png' })
   })
 
-  it('navigates Overview → Details → focused Graph → another entity Details', () => {
-    let history = initNavigationHistory(overview())
-    history = pushNavigation(history, details('object:sid:player'))
-    history = pushNavigation(history, projectEntryForView(currentNavigationEntry(history), 'graph'))
-    history = pushNavigation(history, details('eventSheet:sid:events'))
+  it('restores project, graph, and resource selections through Back and Forward', async () => {
+    const router = createForgeRouter(createMemoryHistory())
+    const entries: NavigationEntry[] = [
+      projectOverviewEntry(),
+      { workspace: 'project', entityId: 'object:sid:Player', view: 'details' },
+      { workspace: 'project', entityId: 'object:sid:Player', view: 'graph' },
+      { workspace: 'project', entityId: 'event-sheet:sid:GameEvents', view: 'details' },
+      resourceWorkspaceEntry(),
+      { workspace: 'resources', resourcePath: 'images/player.png' },
+      { workspace: 'resources', resourcePath: 'images/background.png' },
+    ]
 
-    expect(history.entries).toEqual([
-      overview(),
-      details('object:sid:player'),
-      graph('object:sid:player'),
-      details('eventSheet:sid:events'),
-    ])
-    expect(currentNavigationEntry(backNavigation(history))).toEqual(graph('object:sid:player'))
-  })
-
-  it('restores the exact Graph context after opening an entity', () => {
-    const selectedGraph = graph('object:sid:player')
-    const history = pushNavigation(initNavigationHistory(selectedGraph), details('eventSheet:sid:events'))
-
-    expect(currentNavigationEntry(backNavigation(history))).toEqual(selectedGraph)
-  })
-
-  it('shows the project architecture graph at the Project root', () => {
-    expect(projectEntryForView(overview(), 'graph')).toEqual(graph(null))
-    expect(projectEntryForView(resources('images/player.png'), 'graph')).toEqual(graph(null))
-  })
-
-  it('keeps a resource selection independent and traversable from the Project state', () => {
-    let history = initNavigationHistory(details('object:sid:player'))
-    history = pushNavigation(history, resourceWorkspaceEntry())
-    history = pushNavigation(history, resources('images/player.png'))
-    history = pushNavigation(history, resources('images/background.png'))
-
-    expect(currentNavigationEntry(history)).toEqual(resources('images/background.png'))
-    expect(currentNavigationEntry(backNavigation(history))).toEqual(resources('images/player.png'))
-    expect(currentNavigationEntry(backNavigation(backNavigation(history)))).toEqual(resources(null))
-    expect(currentNavigationEntry(backNavigation(backNavigation(backNavigation(history))))).toEqual(details('object:sid:player'))
-    expect(currentNavigationEntry(forwardNavigation(backNavigation(history)))).toEqual(resources('images/background.png'))
-    expect('entityId' in currentNavigationEntry(history)).toBe(false)
-  })
-
-  it('restores every step in the full Project, Graph, and Resources flow', () => {
-    let history = initNavigationHistory(overview())
-    history = pushNavigation(history, details('object:sid:player'))
-    history = pushNavigation(history, graph('object:sid:player'))
-    history = pushNavigation(history, details('eventSheet:sid:events'))
-    history = pushNavigation(history, resources(null))
-    history = pushNavigation(history, resources('images/player.png'))
-    history = pushNavigation(history, resources('images/background.png'))
-
-    expect(history.entries).toEqual([
-      overview(),
-      details('object:sid:player'),
-      graph('object:sid:player'),
-      details('eventSheet:sid:events'),
-      resources(null),
-      resources('images/player.png'),
-      resources('images/background.png'),
-    ])
-    const backwardEntries: NavigationEntry[] = []
-    while (canBack(history)) {
-      history = backNavigation(history)
-      backwardEntries.push(currentNavigationEntry(history))
+    for (const [index, entry] of entries.entries()) {
+      await pushEntry(router, entry, `route-${index}`, index > 0)
     }
-    expect(backwardEntries).toEqual([
-      resources('images/player.png'),
-      resources(null),
-      details('eventSheet:sid:events'),
-      graph('object:sid:player'),
-      details('object:sid:player'),
-      overview(),
-    ])
-    while (canForward(history)) history = forwardNavigation(history)
-    expect(currentNavigationEntry(history)).toEqual(resources('images/background.png'))
+
+    expect(currentForgeState(router)?.entry).toEqual(entries[6])
+    expect(canNavigateBackFromHistoryState(router.options.history.state)).toBe(true)
+
+    for (const expected of [...entries.slice(0, 6)].reverse()) {
+      router.back()
+      await settleHistoryNavigation()
+      expect(currentForgeState(router)?.entry).toEqual(expected)
+    }
+    expect(canNavigateBackFromHistoryState(router.options.history.state)).toBe(false)
+    expect(canNavigateForwardFromHistoryState({ forward: '/workspace/resources/next' })).toBe(true)
+
+    for (const expected of entries.slice(1)) {
+      router.forward()
+      await settleHistoryNavigation()
+      expect(currentForgeState(router)?.entry).toEqual(expected)
+    }
   })
 
-  it('truncates the forward branch when navigating after Back', () => {
-    let history = initNavigationHistory(details('object:sid:player'))
-    history = pushNavigation(history, details('eventSheet:sid:events'))
-    history = pushNavigation(history, resources('images/player.png'))
-    history = backNavigation(history)
-    history = pushNavigation(history, details('function:sid:spawn'))
+  it('clears the forward branch when navigation starts after Back', async () => {
+    const router = createForgeRouter(createMemoryHistory())
+    await pushEntry(router, projectOverviewEntry(), 'root', false)
+    await pushEntry(router, { workspace: 'project', entityId: 'object:sid:Player', view: 'details' }, 'player')
+    await pushEntry(router, { workspace: 'project', entityId: 'function:sid:SpawnEnemy', view: 'details' }, 'spawn')
 
-    expect(history.entries).toEqual([
-      details('object:sid:player'),
-      details('eventSheet:sid:events'),
-      details('function:sid:spawn'),
-    ])
-    expect(currentNavigationEntry(history)).toEqual(details('function:sid:spawn'))
-    expect(canForward(history)).toBe(false)
+    router.back()
+    await settleHistoryNavigation()
+    await pushEntry(router, { workspace: 'project', entityId: 'event-sheet:sid:Game', view: 'details' }, 'game')
+
+    expect(currentForgeState(router)?.entry).toEqual({
+      workspace: 'project', entityId: 'event-sheet:sid:Game', view: 'details',
+    })
+    router.forward()
+    await settleHistoryNavigation()
+    expect(currentForgeState(router)?.entry).toEqual({
+      workspace: 'project', entityId: 'event-sheet:sid:Game', view: 'details',
+    })
   })
 
-  it('does not add identical entries and leaves history boundaries unchanged', () => {
-    const entry = details('object:sid:player')
-    const initial = initNavigationHistory(entry)
-    expect(pushNavigation(initial, { ...entry })).toBe(initial)
-    expect(backNavigation(initial)).toBe(initial)
-    expect(forwardNavigation(initial)).toBe(initial)
+  it('honors session back boundaries and compares entries by their selected state', async () => {
+    const router = createForgeRouter(createMemoryHistory())
+    await pushEntry(router, projectOverviewEntry(), 'root', false)
+    expect(canNavigateBackFromHistoryState(router.options.history.state)).toBe(false)
+    await pushEntry(router, { workspace: 'project', entityId: 'object:sid:Player', view: 'details' }, 'player')
+    expect(canNavigateBackFromHistoryState(router.options.history.state)).toBe(true)
+    expect(canNavigateBackFromHistoryState({
+      c3ForgeNavigation: { projectSessionId: 'project-session', entry: { workspace: 'project', entityId: null, view: 'details' }, canGoBack: false },
+      back: '/before-project',
+    })).toBe(false)
+    expect(canNavigateBackFromHistoryState({
+      c3ForgeNavigation: { projectSessionId: 'project-session', entry: { workspace: 'project', entityId: 'object:sid:Player', view: 'details' }, canGoBack: true },
+      back: null,
+    })).toBe(false)
+    expect(canNavigateBackFromHistoryState({
+      c3ForgeNavigation: { projectSessionId: 'project-session', entry: { workspace: 'project', entityId: 'object:sid:Player', view: 'details' }, canGoBack: true },
+      back: undefined,
+    })).toBe(false)
+    expect(canNavigateForwardFromHistoryState({ forward: '/forward-entry' })).toBe(true)
+    expect(canNavigateForwardFromHistoryState({ forward: null })).toBe(false)
+
+    expect(sameNavigationEntry(projectOverviewEntry(), projectOverviewEntry())).toBe(true)
+    expect(sameNavigationEntry(projectOverviewEntry(), { workspace: 'project', entityId: null, view: 'graph' })).toBe(false)
+    expect(sameNavigationEntry(resourceWorkspaceEntry(), { workspace: 'resources', resourcePath: 'images/player.png' })).toBe(false)
   })
 })
