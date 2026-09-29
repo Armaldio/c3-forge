@@ -86,6 +86,11 @@ export function forgeNavigationStateFromHistoryState(value: unknown): ForgeNavig
   }
 }
 
+export function navigationEntryForProjectSession(value: unknown, sessionId: string): NavigationEntry {
+  const stored = forgeNavigationStateFromHistoryState(value)
+  return stored?.projectSessionId === sessionId ? stored.entry : projectOverviewEntry()
+}
+
 export function navigationLocationForEntry(
   entry: NavigationEntry,
   token: string,

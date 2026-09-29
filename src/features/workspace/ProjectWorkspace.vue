@@ -24,11 +24,18 @@ const props = defineProps<{
   loadingStage: ProjectLoadStage | null
   error: string | null
   browserSupported: boolean
+  archivePickerSupported: boolean
+  restoreChecking: boolean
+  savedProjectName: string | null
+  canResumeSavedProject: boolean
+  persistenceNotice: string | null
 }>()
 
 const emit = defineEmits<{
   'open-project': []
   'open-archive': [file: File]
+  'open-archive-picker': []
+  'resume-saved-project': []
   'update:searchQuery': [value: string]
   'select-entity': [id: string]
   'select-resource': [path: string]
@@ -77,13 +84,16 @@ function closeProjectMenu(): void {
 }
 
 function chooseFolder(): void {
+  if (props.loading || props.restoreChecking || !props.browserSupported) return
   closeProjectMenu()
   emit('open-project')
 }
 
 function chooseArchive(): void {
+  if (props.loading || props.restoreChecking) return
   closeProjectMenu()
-  archiveInput.value?.click()
+  if (props.archivePickerSupported) emit('open-archive-picker')
+  else archiveInput.value?.click()
 }
 
 function toggleDiagnostics(): void {
@@ -210,14 +220,14 @@ function handleArchiveSelection(event: Event): void {
           <div class="project-open-menu-list">
             <button
               type="button"
-              :disabled="loading || !browserSupported"
+              :disabled="loading || restoreChecking || !browserSupported"
               @click="chooseFolder"
             >
               Open folder project
             </button>
             <button
               type="button"
-              :disabled="loading"
+              :disabled="loading || restoreChecking"
               @click="chooseArchive"
             >
               Open .c3p archive
@@ -239,6 +249,14 @@ function handleArchiveSelection(event: Event): void {
       </div>
 
       <div
+        v-if="persistenceNotice"
+        class="persistence-notice"
+        role="status"
+      >
+        {{ persistenceNotice }}
+      </div>
+
+      <div
         v-if="error"
         class="error-banner"
         role="alert"
@@ -255,6 +273,15 @@ function handleArchiveSelection(event: Event): void {
           @click="chooseFolder"
         >
           Try another folder
+        </button>
+        <button
+          v-if="canResumeSavedProject"
+          class="text-button"
+          type="button"
+          :disabled="loading"
+          @click="emit('resume-saved-project')"
+        >
+          Resume {{ savedProjectName }}
         </button>
         <button
           class="text-button"
@@ -498,6 +525,32 @@ function handleArchiveSelection(event: Event): void {
         <div class="state-index">
           C3 / LOCAL ANALYSIS
         </div>
+        <div
+          v-if="canResumeSavedProject && savedProjectName"
+          class="saved-project-resume"
+          role="group"
+          aria-label="Previously opened project"
+        >
+          <div>
+            <strong>Continue {{ savedProjectName }}</strong>
+            <p>Reconnect to the previously opened project to restore it.</p>
+          </div>
+          <button
+            class="open-project-button state-action"
+            type="button"
+            :disabled="loading"
+            @click="emit('resume-saved-project')"
+          >
+            Resume project
+          </button>
+        </div>
+        <p
+          v-else-if="restoreChecking"
+          class="state-footnote"
+          role="status"
+        >
+          Checking for a previously opened project…
+        </p>
         <template v-if="!browserSupported">
           <div
             class="state-mark unsupported-mark"
@@ -525,7 +578,7 @@ function handleArchiveSelection(event: Event): void {
             <button
               class="open-project-button archive-open-button state-action"
               type="button"
-              :disabled="loading"
+              :disabled="loading || restoreChecking"
               @click="chooseArchive"
             >
               <span aria-hidden="true">▣</span>Open .c3p archive
@@ -552,7 +605,7 @@ function handleArchiveSelection(event: Event): void {
             <button
               class="open-project-button state-action"
               type="button"
-              :disabled="loading"
+              :disabled="loading || restoreChecking"
               @click="chooseFolder"
             >
               <span aria-hidden="true">+</span>Open project folder
@@ -560,7 +613,7 @@ function handleArchiveSelection(event: Event): void {
             <button
               class="open-project-button archive-open-button state-action"
               type="button"
-              :disabled="loading"
+              :disabled="loading || restoreChecking"
               @click="chooseArchive"
             >
               <span aria-hidden="true">▣</span>Open .c3p archive

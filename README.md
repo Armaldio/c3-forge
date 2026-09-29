@@ -14,9 +14,9 @@ V0 intentionally does not write to projects or implement refactoring, rollback, 
 
 ## Browser support
 
-Opening a folder uses Chromium's File System Access API. Use a current Chromium-based browser and serve Forge from HTTPS or `localhost` (the browser requires a secure context). Browser support for `showDirectoryPicker()` is limited; Forge detects whether the API is available and displays a requirement message when it is not. `.c3p` archives use the browser's regular file picker and do not need an environment variable or server-side processing.
+Opening a folder uses Chromium's File System Access API. Use a current Chromium-based browser and serve Forge from HTTPS or `localhost` (the browser requires a secure context). Browser support for `showDirectoryPicker()` is limited; Forge detects whether the API is available and displays a requirement message when it is not. In supported browsers, `.c3p` archives use the native file picker so Forge can remember the selected file handle.
 
-Choose a folder containing `project.c3proj` or select a `.c3p` archive. Archives are inspected in memory and never extracted to disk or uploaded. The browser may ask for read access when a folder is selected.
+Choose a folder containing `project.c3proj` or select a `.c3p` archive. Forge remembers the selected native file or folder handle in browser IndexedDB, so the project can be restored after a reload. The browser may ask you to grant read access again; choose **Resume project** when prompted. Closing a project removes its remembered handle. Forge does not store parsed project data or write to Construct files. Archives are inspected in memory and never extracted to disk or uploaded. Browsers without the native file picker can still open a `.c3p` using the temporary file picker, but that selection must be made again after a reload.
 
 ## Run and verify
 

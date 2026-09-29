@@ -4,6 +4,7 @@ import {
   canNavigateBackFromHistoryState,
   canNavigateForwardFromHistoryState,
   forgeNavigationStateFromHistoryState,
+  navigationEntryForProjectSession,
   navigationLocationForEntry,
   projectOverviewEntry,
   resourceWorkspaceEntry,
@@ -128,5 +129,20 @@ describe('Vue Router navigation state', () => {
     expect(sameNavigationEntry(projectOverviewEntry(), projectOverviewEntry())).toBe(true)
     expect(sameNavigationEntry(projectOverviewEntry(), { workspace: 'project', entityId: null, view: 'graph' })).toBe(false)
     expect(sameNavigationEntry(resourceWorkspaceEntry(), { workspace: 'resources', resourcePath: 'images/player.png' })).toBe(false)
+  })
+
+  it('restores the saved route selection only for the matching project session', () => {
+    const browserState = {
+      c3ForgeNavigation: {
+        projectSessionId: 'session-current',
+        entry: { workspace: 'resources', resourcePath: 'images/background.png' },
+        canGoBack: true,
+      },
+    }
+
+    expect(navigationEntryForProjectSession(browserState, 'session-current')).toEqual({
+      workspace: 'resources', resourcePath: 'images/background.png',
+    })
+    expect(navigationEntryForProjectSession(browserState, 'session-old')).toEqual(projectOverviewEntry())
   })
 })

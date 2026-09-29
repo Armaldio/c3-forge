@@ -1975,6 +1975,14 @@ code {
   color: #edb8ac;
 }
 
+.persistence-notice {
+  padding: 7px 20px;
+  border-bottom: 1px solid var(--line);
+  background: #172119;
+  color: #c9d6b4;
+  font-size: 11px;
+}
+
 .welcome-state {
   min-height: min(690px, calc(100vh - 120px));
   flex: 1 1 auto;
@@ -2045,6 +2053,35 @@ code {
 
 .state-actions .state-action {
   margin-top: 0;
+}
+
+.saved-project-resume {
+  width: min(100%, 520px);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0 0 22px;
+  padding: 14px 16px;
+  border: 1px solid #3b4a3d;
+  border-radius: 8px;
+  background: #151f18;
+}
+
+.saved-project-resume strong {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.saved-project-resume p {
+  margin: 3px 0 0;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.saved-project-resume .state-action {
+  flex: 0 0 auto;
+  margin: 0;
 }
 
 .state-footnote {
@@ -2265,6 +2302,11 @@ code {
     min-height: calc(100vh - 86px);
     min-height: calc(100dvh - 86px);
     padding: 45px 22px;
+  }
+
+  .saved-project-resume {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .stage-list {
