@@ -19,6 +19,20 @@ function folderSource(queryResult: PermissionState, requestResult: PermissionSta
   }
 }
 
+function archiveSource(queryResult: PermissionState, requestResult: PermissionState = 'granted') {
+  const handle = {
+    kind: 'file',
+    name: 'Platformer.c3p',
+    getFile: vi.fn(),
+    queryPermission: vi.fn().mockResolvedValue(queryResult),
+    requestPermission: vi.fn().mockResolvedValue(requestResult),
+  }
+  return {
+    source: { kind: 'archive-handle', displayName: 'Platformer.c3p', handle } as unknown as ProjectFileSource,
+    handle,
+  }
+}
+
 describe('saved project handle permissions', () => {
   it('checks read permission without prompting during reload', async () => {
     const { source, handle } = folderSource('prompt')
@@ -39,6 +53,15 @@ describe('saved project handle permissions', () => {
     const { source, handle } = folderSource('prompt', 'denied')
 
     await expect(requestProjectSourcePermission(source)).resolves.toBe('denied')
+    expect(handle.requestPermission).toHaveBeenCalledWith({ mode: 'read' })
+  })
+
+  it('checks and requests read access for a saved .c3p file handle', async () => {
+    const { source, handle } = archiveSource('prompt')
+
+    await expect(queryProjectSourcePermission(source)).resolves.toBe('prompt')
+    await expect(requestProjectSourcePermission(source)).resolves.toBe('granted')
+    expect(handle.queryPermission).toHaveBeenCalledWith({ mode: 'read' })
     expect(handle.requestPermission).toHaveBeenCalledWith({ mode: 'read' })
   })
 })
