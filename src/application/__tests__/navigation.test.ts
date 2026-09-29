@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   canNavigateBackFromHistoryState,
   canNavigateForwardFromHistoryState,
+  entryForWorkspaceSelection,
   forgeNavigationStateFromHistoryState,
   navigationEntryForProjectSession,
   navigationLocationForEntry,
@@ -34,6 +35,24 @@ async function settleHistoryNavigation(): Promise<void> {
 }
 
 describe('Vue Router navigation state', () => {
+  it.each([
+    { workspace: 'project' as const, entityId: 'object:sid:Player', view: 'details' as const },
+    { workspace: 'project' as const, entityId: 'object:sid:Player', view: 'graph' as const },
+  ])('restores the last Project state after visiting Resources: %s', (projectEntry) => {
+    const resourcesEntry = entryForWorkspaceSelection(projectEntry, projectEntry, 'resources')
+
+    expect(resourcesEntry).toEqual(resourceWorkspaceEntry())
+    expect(entryForWorkspaceSelection(resourcesEntry, projectEntry, 'project')).toEqual(projectEntry)
+  })
+
+  it('keeps explicit Project-root navigation separate from workspace switching', () => {
+    const lastProjectEntry = { workspace: 'project', entityId: 'object:sid:Player', view: 'graph' } as const
+    const resourcesEntry = entryForWorkspaceSelection(resourceWorkspaceEntry(), lastProjectEntry, 'project')
+
+    expect(resourcesEntry).toEqual(lastProjectEntry)
+    expect(projectOverviewEntry()).toEqual({ workspace: 'project', entityId: null, view: 'details' })
+  })
+
   it('keeps project and resource data in namespaced history state and URLs opaque', async () => {
     const router = createForgeRouter(createMemoryHistory())
     await pushEntry(router, { workspace: 'project', entityId: 'object:sid:Player-17', view: 'details' }, 'opaque-1')

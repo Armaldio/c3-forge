@@ -333,7 +333,7 @@ function handleArchiveSelection(event: Event): void {
               class="min-h-12 min-w-[104px] cursor-pointer border-0 border-b-[3px] border-transparent bg-transparent px-[14px] py-[9px] text-[13px] font-semibold text-text-muted aria-[current=page]:border-accent aria-[current=page]:bg-[#17232b] aria-[current=page]:text-text max-[760px]:min-w-0 max-[760px]:flex-1 max-[760px]:px-2"
               type="button"
               :aria-current="activeWorkspace === 'project' ? 'page' : undefined"
-              @click="emit('navigate-project-root')"
+              @click="selectWorkspace('project')"
             >
               Project
             </button>

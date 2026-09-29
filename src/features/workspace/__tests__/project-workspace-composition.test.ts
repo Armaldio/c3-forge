@@ -137,6 +137,27 @@ describe('Project workspace composition', () => {
     expect(html).not.toContain('class="workspace-navigation-title"')
   })
 
+  it('binds Explorer disclosure arrows to details and keeps only its heading sticky on mobile', async () => {
+    const html = await renderWorkspace({ workspace: 'project', entityId: null, view: 'details' })
+    const explorerStart = indexOfClass(html, 'explorer-pane')
+    const explorerEnd = html.indexOf('</nav>', explorerStart)
+    const explorerHtml = html.slice(explorerStart, explorerEnd)
+    const detailsStart = explorerHtml.indexOf('<details class="explorer-group')
+    const detailsEnd = explorerHtml.indexOf('</details>', detailsStart)
+    const detailsHtml = explorerHtml.slice(detailsStart, detailsEnd)
+    const detailsClass = detailsHtml.match(/<details class="([^"]+)"/)?.[1] ?? ''
+    const summaryClass = detailsHtml.match(/<summary class="([^"]+)"/)?.[1] ?? ''
+    const arrowClass = detailsHtml.match(/<span class="([^"]*group-open:rotate-90[^"]*)"/)?.[1] ?? ''
+
+    expect(detailsClass.split(/\s+/)).toContain('group')
+    expect(summaryClass.split(/\s+/)).not.toContain('group')
+    expect(arrowClass).toContain('group-open:rotate-90')
+    const explorerClass = html.match(/<nav[^>]*class="([^"]*\bexplorer-pane\b[^"]*)"/)?.[1] ?? ''
+    const headingClass = explorerHtml.match(/<div[^>]*class="([^"]*\bpane-heading\b[^"]*)"/)?.[1] ?? ''
+    expect(explorerClass).not.toContain('max-[760px]:sticky')
+    expect(headingClass).toContain('max-[760px]:sticky')
+  })
+
   it('renders Resources as a full-width sibling without Project context', async () => {
     const html = await renderWorkspace({ workspace: 'resources', resourcePath: null })
     const resourcesStart = indexOfClass(html, 'resources-workspace')

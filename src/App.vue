@@ -23,6 +23,7 @@ import {
 import {
   canNavigateBackFromHistoryState,
   canNavigateForwardFromHistoryState,
+  entryForWorkspaceSelection,
   forgeNavigationStateFromHistoryState,
   navigationLocationForEntry,
   navigationEntryForProjectSession,
@@ -337,11 +338,7 @@ function handleNavigateProjectView(view: 'details' | 'graph'): void {
 }
 
 function handleNavigateWorkspace(workspace: NavigationWorkspace): void {
-  if (workspace === 'resources') {
-    navigate(resourceWorkspaceEntry())
-    return
-  }
-  navigate(currentEntry.value.workspace === 'project' ? currentEntry.value : lastProjectEntry)
+  navigate(entryForWorkspaceSelection(currentEntry.value, lastProjectEntry, workspace))
 }
 
 function handleNavigateProjectRoot(): void {

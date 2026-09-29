@@ -13,6 +13,7 @@ export type NavigationEntry =
 
 export type ProjectNavigationView = Extract<NavigationEntry, { workspace: 'project' }>['view']
 export type NavigationWorkspace = NavigationEntry['workspace']
+export type ProjectNavigationEntry = Extract<NavigationEntry, { workspace: 'project' }>
 
 export const PROJECT_WORKSPACE_ROUTE = 'project-workspace'
 export const RESOURCES_WORKSPACE_ROUTE = 'resources-workspace'
@@ -45,6 +46,15 @@ export function projectOverviewEntry(): Extract<NavigationEntry, { workspace: 'p
 
 export function resourceWorkspaceEntry(): Extract<NavigationEntry, { workspace: 'resources' }> {
   return { workspace: 'resources', resourcePath: null }
+}
+
+export function entryForWorkspaceSelection(
+  currentEntry: NavigationEntry,
+  lastProjectEntry: ProjectNavigationEntry,
+  workspace: NavigationWorkspace,
+): NavigationEntry {
+  if (workspace === 'resources') return resourceWorkspaceEntry()
+  return currentEntry.workspace === 'project' ? currentEntry : lastProjectEntry
 }
 
 export function sameNavigationEntry(left: NavigationEntry, right: NavigationEntry): boolean {

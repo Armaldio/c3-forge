@@ -98,7 +98,7 @@ defineExpose({ revealKind })
 <template>
   <nav
     ref="explorerRoot"
-    class="explorer-pane min-w-0 overflow-auto border-r border-line bg-[#101922] max-[760px]:sticky max-[760px]:top-0 max-[760px]:z-[1] max-[760px]:max-h-[38vh] max-[760px]:border-r-0 max-[760px]:border-b max-[760px]:border-line"
+    class="explorer-pane min-w-0 overflow-auto border-r border-line bg-[#101922] max-[760px]:max-h-[38vh] max-[760px]:border-r-0 max-[760px]:border-b max-[760px]:border-line"
     aria-labelledby="explorer-title"
   >
     <div class="pane-heading flex min-h-[58px] items-center justify-between border-b border-line-soft bg-[#101922] px-[13px] py-[10px] max-[760px]:sticky max-[760px]:top-0 max-[760px]:z-[1]">
@@ -130,11 +130,11 @@ defineExpose({ revealKind })
       <details
         v-for="group in groups"
         :key="group.kind"
-        class="explorer-group border-b border-line-soft"
+        class="explorer-group group border-b border-line-soft"
         :data-entity-kind="group.kind"
         :open="group.kind === 'object'"
       >
-        <summary class="explorer-group-heading group flex min-h-[39px] cursor-pointer list-none items-center justify-between gap-2 px-[13px] py-[7px] text-xs font-semibold text-text hover:bg-[#17232d] focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-accent">
+        <summary class="explorer-group-heading flex min-h-[39px] cursor-pointer list-none items-center justify-between gap-2 px-[13px] py-[7px] text-xs font-semibold text-text hover:bg-[#17232d] focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-accent">
           <span class="mr-auto w-[10px] shrink-0 text-[17px] leading-none text-text-dim transition-transform duration-[120ms] group-open:rotate-90">›</span>
           <span>{{ group.label }}</span>
           <span class="explorer-group-count ml-auto text-[11px] text-text-muted">{{ group.entities.length }}</span>
