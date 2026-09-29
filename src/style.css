@@ -1115,6 +1115,31 @@ code {
   color: var(--text);
 }
 
+.project-context-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 5px;
+  padding: 0 22px;
+  border-bottom: 1px solid var(--line);
+  background: #141e27;
+}
+
+.project-context-tabs button {
+  min-height: 36px;
+  padding: 7px 10px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.project-context-tabs button[aria-selected='true'] {
+  border-bottom-color: var(--accent);
+  color: var(--text);
+}
+
 .workspace-view-panel {
   min-width: 0;
 }
@@ -2208,6 +2233,10 @@ code {
   }
 
   .workspace-view-tabs {
+    padding-inline: 14px;
+  }
+
+  .project-context-tabs {
     padding-inline: 14px;
   }
 

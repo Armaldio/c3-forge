@@ -8,7 +8,7 @@ import {
   type ProjectDiagnostic,
   type ProjectLoadStage,
 } from '../../core/types'
-import type { NavigationView } from '../../application/navigation'
+import type { NavigationEntry } from '../../application/navigation'
 
 export type RelationshipTab = 'incoming' | 'outgoing'
 export type RelationshipRole = 'usage/dependency' | 'structure/ownership' | 'definition/resource'
@@ -60,10 +60,10 @@ export function referencesByRole(
   return references.filter((reference) => RELATIONSHIP_PRESENTATION[reference.relationship].role === role)
 }
 
-export function workspaceNavigationTitle(view: NavigationView, entityName?: string): string {
-  if (view === 'resources') return 'Project resources'
-  if (entityName) return entityName
-  return view === 'graph' ? 'Relationship graph' : 'Project overview'
+export function workspaceNavigationTitle(entry: NavigationEntry, entityName?: string): string {
+  if (entry.workspace === 'resources') return 'Project resources'
+  if (entry.view === 'graph') return entityName ? `${entityName} graph` : 'Relationship graph'
+  return entityName ?? 'Project overview'
 }
 
 export interface ProjectDiagnosticSummary {

@@ -16,6 +16,7 @@ import {
 const props = defineProps<{
   analysis: ProjectAnalysis
   graphFocusEntityId: string | null
+  rootGraph: boolean
 }>()
 
 const emit = defineEmits<{
@@ -47,7 +48,7 @@ const entityFilters = reactive<Record<GraphEntityKind, boolean>>({
 const relationshipFilters = reactive<Record<RelationshipKind, boolean>>({
   ...Object.fromEntries(graphRelationshipKinds.map((kind) => [kind, defaultGraphRelationshipKinds.includes(kind)])),
 } as Record<RelationshipKind, boolean>)
-const graphMode = ref<GraphMode>('focus')
+const graphMode = ref<GraphMode>(props.rootGraph ? 'project' : 'focus')
 const focusHops = ref<1 | 2>(1)
 const graphSelectedId = ref(props.graphFocusEntityId
   ?? suggestedGraphFocusEntityId(props.analysis, DEFAULT_ENTITY_KINDS)
@@ -97,7 +98,7 @@ const selectedEntityOutgoing = computed(() => selectedEntity.value
   : 0)
 const filterCount = computed(() => selectedKinds.value.length + selectedRelationships.value.length)
 
-watch(() => props.graphFocusEntityId, (entityId) => {
+watch([() => props.graphFocusEntityId, () => props.rootGraph], ([entityId, rootGraph]) => {
   const restoredEntityId = entityId
     ?? suggestedGraphFocusEntityId(props.analysis, selectedKinds.value)
     ?? ''
@@ -105,7 +106,7 @@ watch(() => props.graphFocusEntityId, (entityId) => {
   graphSelectionExplicit.value = Boolean(entityId)
   const entity = props.analysis.index.byId.get(restoredEntityId)
   if (entity) enableSelectedKind(entity.kind)
-  graphMode.value = 'focus'
+  graphMode.value = rootGraph ? 'project' : 'focus'
 })
 
 watch([graphMode, graphSelectedId, selectedKinds], () => {
@@ -119,7 +120,7 @@ watch(() => props.analysis, (analysis) => {
     ?? suggestedGraphFocusEntityId(analysis, DEFAULT_ENTITY_KINDS)
     ?? ''
   graphSelectionExplicit.value = Boolean(props.graphFocusEntityId)
-  graphMode.value = 'focus'
+  graphMode.value = props.rootGraph ? 'project' : 'focus'
   zoom.value = 1
   pan.value = { x: 0, y: 0 }
 })
@@ -251,10 +252,12 @@ function fitGraph(): void {
 function focusOnSelected(): void {
   graphMode.value = 'focus'
   if (!graphSelectedId.value) graphSelectedId.value = focusEntityId.value ?? ''
+  if (graphSelectedId.value) emit('update:graphFocusEntityId', graphSelectedId.value)
 }
 
 function setProjectMode(): void {
   graphMode.value = 'project'
+  if (props.graphFocusEntityId) emit('update:graphFocusEntityId', null)
 }
 </script>
 
@@ -266,7 +269,7 @@ function setProjectMode(): void {
     <header class="graph-heading">
       <div>
         <p class="eyebrow">
-          Project architecture
+          {{ rootGraph ? 'Project architecture' : 'Focused project view' }}
         </p>
         <h1>Relationship graph</h1>
       </div>

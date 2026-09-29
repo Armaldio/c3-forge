@@ -2,29 +2,25 @@ import { describe, expect, it } from 'vitest'
 import { navigationHash, parseNavigationHash } from '../navigation-url'
 
 describe('workspace navigation URLs', () => {
-  it('uses Project as the root route while keeping all selection state opaque', () => {
-    const url = navigationHash('project', 'opaque-project-route')
+  it('uses only the two top-level workspaces and opaque tokens', () => {
+    const projectUrl = navigationHash('project', 'opaque-project-route')
+    const resourcesUrl = navigationHash('resources', 'opaque-resource-route')
 
-    expect(url).toBe('#/workspace/project/opaque-project-route')
-    expect(parseNavigationHash(url)).toEqual({ view: 'project', token: 'opaque-project-route' })
-    expect(url).not.toContain('object:sid')
-    expect(url).not.toContain('images/')
-    expect(url).not.toContain('Player')
+    expect(projectUrl).toBe('#/workspace/project/opaque-project-route')
+    expect(resourcesUrl).toBe('#/workspace/resources/opaque-resource-route')
+    expect(parseNavigationHash(projectUrl)).toEqual({ workspace: 'project', token: 'opaque-project-route' })
+    expect(parseNavigationHash(resourcesUrl)).toEqual({ workspace: 'resources', token: 'opaque-resource-route' })
+    for (const url of [projectUrl, resourcesUrl]) {
+      expect(url).not.toContain('object:sid')
+      expect(url).not.toContain('images/')
+      expect(url).not.toContain('Player')
+    }
   })
 
-  it('encodes only the view and opaque token, never an entity ID or local path', () => {
-    const url = navigationHash('graph', 'opaque-route-42')
-
-    expect(url).toBe('#/workspace/graph/opaque-route-42')
-    expect(url).not.toContain('object:sid')
-    expect(url).not.toContain('Player')
-    expect(url).not.toContain('objectTypes')
-  })
-
-  it('parses supported view routes and rejects paths carrying project data', () => {
-    expect(parseNavigationHash('#/workspace/resources/route-1')).toEqual({ view: 'resources', token: 'route-1' })
+  it('rejects paths that encode entity or resource state', () => {
     expect(parseNavigationHash('#/entity/object:sid:123')).toBeNull()
     expect(parseNavigationHash('#/workspace/graph/object:sid:123')).toBeNull()
+    expect(parseNavigationHash('#/workspace/project/object:sid:123')).toBeNull()
     expect(parseNavigationHash('#/workspace/unknown/route-1')).toBeNull()
   })
 })

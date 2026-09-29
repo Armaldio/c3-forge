@@ -10,17 +10,16 @@ import {
   canForward,
   currentNavigationEntry,
   initNavigationHistory,
-  navigationEntryForView,
   pushNavigation,
   type NavigationEntry,
   type NavigationHistory,
-  type NavigationView,
+  type NavigationWorkspace,
 } from './application/navigation'
 import { navigationHash } from './application/navigation-url'
 
 const analysis = shallowRef<ProjectAnalysis | null>(null)
 const filesystem = shallowRef<ProjectFileSystem | null>(null)
-const workspaceHistory = shallowRef<NavigationHistory>(initNavigationHistory({ view: 'project', entityId: null }))
+const workspaceHistory = shallowRef<NavigationHistory>(initNavigationHistory({ workspace: 'project', entityId: null, view: 'details' }))
 const currentEntry = computed(() => currentNavigationEntry(workspaceHistory.value))
 const resourceNavigationPaths = computed(() => new Set(
   analysis.value ? buildProjectResourceItems(analysis.value).map((resource) => resource.navigationPath) : [],
@@ -89,22 +88,40 @@ async function handleOpenProjectArchive(file: File): Promise<void> {
 
 function handleSelectEntity(entityId: string): void {
   if (!analysis.value?.index.byId.has(entityId)) return
-  navigate({ view: 'project', entityId })
+  navigate({ workspace: 'project', entityId, view: 'details' })
 }
 
-function handleNavigateView(view: NavigationView): void {
-  navigate(navigationEntryForView(currentEntry.value, view))
+function handleNavigateProjectView(view: 'details' | 'graph'): void {
+  const entityId = currentEntry.value.workspace === 'project' ? currentEntry.value.entityId : null
+  navigate({ workspace: 'project', entityId, view })
+}
+
+function handleNavigateWorkspace(workspace: NavigationWorkspace): void {
+  if (workspace === 'resources') {
+    navigate({ workspace: 'resources', resourcePath: null })
+    return
+  }
+
+  const previousProjectEntry = currentEntry.value.workspace === 'project'
+    ? currentEntry.value
+    : [...workspaceHistory.value.entries.slice(0, workspaceHistory.value.index)].reverse()
+        .find((entry) => entry.workspace === 'project')
+  navigate(previousProjectEntry ?? { workspace: 'project', entityId: null, view: 'details' })
+}
+
+function handleNavigateProjectRoot(): void {
+  navigate({ workspace: 'project', entityId: null, view: 'details' })
 }
 
 function handleGraphFocusChange(entityId: string | null): void {
-  if (currentEntry.value.view !== 'graph') return
-  const focusEntityId = entityId && analysis.value?.index.byId.has(entityId) ? entityId : null
-  navigate({ view: 'graph', focusEntityId })
+  if (currentEntry.value.workspace !== 'project' || currentEntry.value.view !== 'graph') return
+  const selectedEntityId = entityId && analysis.value?.index.byId.has(entityId) ? entityId : null
+  navigate({ workspace: 'project', entityId: selectedEntityId, view: 'graph' })
 }
 
 function handleSelectResource(resourcePath: string): void {
   if (!resourcePath || !resourceNavigationPaths.value.has(resourcePath)) return
-  navigate({ view: 'resources', resourcePath })
+  navigate({ workspace: 'resources', resourcePath })
 }
 
 function navigate(entry: NavigationEntry): void {
@@ -117,7 +134,7 @@ function navigate(entry: NavigationEntry): void {
 
 function resetProjectNavigation(): void {
   projectSessionId = createOpaqueToken()
-  workspaceHistory.value = initNavigationHistory({ view: 'project', entityId: null })
+  workspaceHistory.value = initNavigationHistory({ workspace: 'project', entityId: null, view: 'details' })
   persistNavigation(workspaceHistory.value, true)
 }
 
@@ -137,7 +154,7 @@ function persistNavigation(history: NavigationHistory, replace: boolean): void {
     ...browserState,
     c3ForgeNavigation: { projectSessionId, history },
   }
-  const hash = navigationHash(entry.view, createOpaqueToken())
+  const hash = navigationHash(entry.workspace, createOpaqueToken())
   if (replace) {
     window.history.replaceState(state, '', hash)
   } else {
@@ -148,7 +165,7 @@ function persistNavigation(history: NavigationHistory, replace: boolean): void {
         ...browserState,
         c3ForgeNavigation: { projectSessionId, history: previousHistory },
       }
-      window.history.replaceState(previousState, '', navigationHash(previousEntry.view, createOpaqueToken()))
+      window.history.replaceState(previousState, '', navigationHash(previousEntry.workspace, createOpaqueToken()))
     }
     window.history.pushState(state, '', hash)
   }
@@ -161,7 +178,7 @@ function restoreBrowserNavigation(): void {
     ? (state as Record<string, unknown>).c3ForgeNavigation
     : undefined
   if (!isRecord(stored) || stored.projectSessionId !== projectSessionId || !isNavigationHistory(stored.history)) {
-    workspaceHistory.value = initNavigationHistory({ view: 'project', entityId: null })
+    workspaceHistory.value = initNavigationHistory({ workspace: 'project', entityId: null, view: 'details' })
     persistNavigation(workspaceHistory.value, true)
     return
   }
@@ -177,11 +194,10 @@ function isNavigationHistory(value: unknown): value is NavigationHistory {
   if (value.entries.length === 0 || (value.index as number) < 0 || (value.index as number) >= value.entries.length) return false
   return value.entries.every((entry) => {
     if (!isRecord(entry)) return false
-    if (entry.view === 'project') return Object.keys(entry).every((key) => key === 'view' || key === 'entityId')
+    if (entry.workspace === 'project') return Object.keys(entry).every((key) => key === 'workspace' || key === 'entityId' || key === 'view')
+      && (entry.view === 'details' || entry.view === 'graph')
       && (entry.entityId === null || typeof entry.entityId === 'string')
-    if (entry.view === 'graph') return Object.keys(entry).every((key) => key === 'view' || key === 'focusEntityId')
-      && (entry.focusEntityId === null || typeof entry.focusEntityId === 'string')
-    if (entry.view === 'resources') return Object.keys(entry).every((key) => key === 'view' || key === 'resourcePath')
+    if (entry.workspace === 'resources') return Object.keys(entry).every((key) => key === 'workspace' || key === 'resourcePath')
       && (entry.resourcePath === null || typeof entry.resourcePath === 'string')
     return false
   })
@@ -192,20 +208,16 @@ function sanitizeNavigationHistory(history: NavigationHistory, project: ProjectA
   return {
     index: history.index,
     entries: history.entries.map((entry): NavigationEntry => {
-      switch (entry.view) {
+      switch (entry.workspace) {
         case 'project':
           return {
-            view: 'project',
+            workspace: 'project',
             entityId: entry.entityId && project.index.byId.has(entry.entityId) ? entry.entityId : null,
-          }
-        case 'graph':
-          return {
-            view: 'graph',
-            focusEntityId: entry.focusEntityId && project.index.byId.has(entry.focusEntityId) ? entry.focusEntityId : null,
+            view: entry.view,
           }
         case 'resources':
           return {
-            view: 'resources',
+            workspace: 'resources',
             resourcePath: entry.resourcePath && resourcePaths.has(entry.resourcePath) ? entry.resourcePath : null,
           }
       }
@@ -234,7 +246,7 @@ function handleClearProject(): void {
   analysis.value = null
   filesystem.value = null
   projectSessionId = null
-  workspaceHistory.value = initNavigationHistory({ view: 'project', entityId: null })
+  workspaceHistory.value = initNavigationHistory({ workspace: 'project', entityId: null, view: 'details' })
   window.history.replaceState({}, '', `${window.location.pathname}${window.location.search}#`)
   searchQuery.value = ''
   error.value = null
@@ -261,7 +273,9 @@ onUnmounted(() => window.removeEventListener('popstate', handlePopState))
     @open-archive="handleOpenProjectArchive"
     @update:search-query="searchQuery = $event"
     @select-entity="handleSelectEntity"
-    @navigate-view="handleNavigateView"
+    @navigate-workspace="handleNavigateWorkspace"
+    @navigate-project-view="handleNavigateProjectView"
+    @navigate-project-root="handleNavigateProjectRoot"
     @graph-focus-change="handleGraphFocusChange"
     @select-resource="handleSelectResource"
     @navigate-back="handleNavigateBack"

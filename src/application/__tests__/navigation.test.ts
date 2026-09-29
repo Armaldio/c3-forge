@@ -6,111 +6,125 @@ import {
   currentNavigationEntry,
   forwardNavigation,
   initNavigationHistory,
-  navigationEntryForView,
+  projectEntryForView,
+  projectOverviewEntry,
   pushNavigation,
+  resourceWorkspaceEntry,
   type NavigationEntry,
 } from '../navigation'
 
-const project = (entityId: string | null): NavigationEntry => ({ view: 'project', entityId })
-const graph = (focusEntityId: string | null): NavigationEntry => ({ view: 'graph', focusEntityId })
-const resources = (resourcePath: string | null): NavigationEntry => ({ view: 'resources', resourcePath })
+const overview = (): NavigationEntry => projectOverviewEntry()
+const details = (entityId: string): NavigationEntry => ({ workspace: 'project', entityId, view: 'details' })
+const graph = (entityId: string | null): NavigationEntry => ({ workspace: 'project', entityId, view: 'graph' })
+const resources = (resourcePath: string | null): NavigationEntry => ({ workspace: 'resources', resourcePath })
 
 describe('navigation history', () => {
-  it('starts at the Project root and reports no back or forward navigation', () => {
-    const history = initNavigationHistory(project(null))
+  it('starts at Project Overview', () => {
+    const history = initNavigationHistory(overview())
 
-    expect(history).toEqual({ entries: [project(null)], index: 0 })
-    expect(currentNavigationEntry(history)).toEqual(project(null))
+    expect(history).toEqual({ entries: [overview()], index: 0 })
+    expect(currentNavigationEntry(history)).toEqual(overview())
     expect(canBack(history)).toBe(false)
     expect(canForward(history)).toBe(false)
   })
 
-  it('traverses Project root, entity selections, and views as normal entries', () => {
-    const root = project(null)
-    const player = project('object:sid:player')
-    const events = project('eventSheet:sid:events')
-    const graphView = graph('eventSheet:sid:events')
-    let history = initNavigationHistory(root)
-    history = pushNavigation(history, player)
-    history = pushNavigation(history, events)
-    history = pushNavigation(history, graphView)
+  it('navigates Overview → Details → focused Graph → another entity Details', () => {
+    let history = initNavigationHistory(overview())
+    history = pushNavigation(history, details('object:sid:player'))
+    history = pushNavigation(history, projectEntryForView(currentNavigationEntry(history), 'graph'))
+    history = pushNavigation(history, details('eventSheet:sid:events'))
 
-    expect(history.entries).toEqual([root, player, events, graphView])
-    expect(currentNavigationEntry(backNavigation(history))).toEqual(events)
-    expect(currentNavigationEntry(forwardNavigation(backNavigation(history)))).toEqual(graphView)
-  })
-
-  it('records explicit graph focus changes as history entries', () => {
-    let history = initNavigationHistory(graph(null))
-    history = pushNavigation(history, graph('object:sid:player'))
-    history = pushNavigation(history, graph('eventSheet:sid:events'))
-
+    expect(history.entries).toEqual([
+      overview(),
+      details('object:sid:player'),
+      graph('object:sid:player'),
+      details('eventSheet:sid:events'),
+    ])
     expect(currentNavigationEntry(backNavigation(history))).toEqual(graph('object:sid:player'))
-    expect(currentNavigationEntry(forwardNavigation(backNavigation(history)))).toEqual(graph('eventSheet:sid:events'))
   })
 
-  it('returns from opening a graph entity to the previous focused graph entry', () => {
-    const focusedGraph = graph('object:sid:player')
-    const openedEntity = project('eventSheet:sid:events')
-    const history = pushNavigation(initNavigationHistory(focusedGraph), openedEntity)
+  it('restores the exact Graph context after opening an entity', () => {
+    const selectedGraph = graph('object:sid:player')
+    const history = pushNavigation(initNavigationHistory(selectedGraph), details('eventSheet:sid:events'))
 
-    expect(currentNavigationEntry(history)).toEqual(openedEntity)
-    expect(currentNavigationEntry(backNavigation(history))).toEqual(focusedGraph)
+    expect(currentNavigationEntry(backNavigation(history))).toEqual(selectedGraph)
   })
 
-  it('opens each top-level view with only its own state and carries focus into Graph', () => {
-    const player = project('object:sid:player')
-    expect(navigationEntryForView(player, 'graph')).toEqual(graph('object:sid:player'))
-    expect(navigationEntryForView(graph('eventSheet:sid:events'), 'graph')).toEqual(graph('eventSheet:sid:events'))
-    expect(navigationEntryForView(resources('images/player.png'), 'graph')).toEqual(graph(null))
-    expect(navigationEntryForView(player, 'project')).toEqual(project(null))
-    expect(navigationEntryForView(player, 'resources')).toEqual(resources(null))
+  it('shows the project architecture graph at the Project root', () => {
+    expect(projectEntryForView(overview(), 'graph')).toEqual(graph(null))
+    expect(projectEntryForView(resources('images/player.png'), 'graph')).toEqual(graph(null))
   })
 
-  it('keeps resource selection in Resources history without carrying the Project entity', () => {
-    const player = project('object:sid:player')
-    let history = initNavigationHistory(player)
-    history = pushNavigation(history, resources(null))
+  it('keeps a resource selection independent and traversable from the Project state', () => {
+    let history = initNavigationHistory(details('object:sid:player'))
+    history = pushNavigation(history, resourceWorkspaceEntry())
     history = pushNavigation(history, resources('images/player.png'))
     history = pushNavigation(history, resources('images/background.png'))
 
     expect(currentNavigationEntry(history)).toEqual(resources('images/background.png'))
     expect(currentNavigationEntry(backNavigation(history))).toEqual(resources('images/player.png'))
     expect(currentNavigationEntry(backNavigation(backNavigation(history)))).toEqual(resources(null))
-    expect(currentNavigationEntry(backNavigation(backNavigation(backNavigation(history))))).toEqual(player)
+    expect(currentNavigationEntry(backNavigation(backNavigation(backNavigation(history))))).toEqual(details('object:sid:player'))
     expect(currentNavigationEntry(forwardNavigation(backNavigation(history)))).toEqual(resources('images/background.png'))
     expect('entityId' in currentNavigationEntry(history)).toBe(false)
   })
 
-  it('truncates the forward branch when navigating after Back', () => {
-    let history = initNavigationHistory(project('object:sid:player'))
-    history = pushNavigation(history, project('eventSheet:sid:events'))
+  it('restores every step in the full Project, Graph, and Resources flow', () => {
+    let history = initNavigationHistory(overview())
+    history = pushNavigation(history, details('object:sid:player'))
+    history = pushNavigation(history, graph('object:sid:player'))
+    history = pushNavigation(history, details('eventSheet:sid:events'))
+    history = pushNavigation(history, resources(null))
     history = pushNavigation(history, resources('images/player.png'))
-    history = backNavigation(history)
-    history = pushNavigation(history, project('function:sid:spawn'))
+    history = pushNavigation(history, resources('images/background.png'))
 
     expect(history.entries).toEqual([
-      project('object:sid:player'),
-      project('eventSheet:sid:events'),
-      project('function:sid:spawn'),
+      overview(),
+      details('object:sid:player'),
+      graph('object:sid:player'),
+      details('eventSheet:sid:events'),
+      resources(null),
+      resources('images/player.png'),
+      resources('images/background.png'),
     ])
-    expect(currentNavigationEntry(history)).toEqual(project('function:sid:spawn'))
+    const backwardEntries: NavigationEntry[] = []
+    while (canBack(history)) {
+      history = backNavigation(history)
+      backwardEntries.push(currentNavigationEntry(history))
+    }
+    expect(backwardEntries).toEqual([
+      resources('images/player.png'),
+      resources(null),
+      details('eventSheet:sid:events'),
+      graph('object:sid:player'),
+      details('object:sid:player'),
+      overview(),
+    ])
+    while (canForward(history)) history = forwardNavigation(history)
+    expect(currentNavigationEntry(history)).toEqual(resources('images/background.png'))
+  })
+
+  it('truncates the forward branch when navigating after Back', () => {
+    let history = initNavigationHistory(details('object:sid:player'))
+    history = pushNavigation(history, details('eventSheet:sid:events'))
+    history = pushNavigation(history, resources('images/player.png'))
+    history = backNavigation(history)
+    history = pushNavigation(history, details('function:sid:spawn'))
+
+    expect(history.entries).toEqual([
+      details('object:sid:player'),
+      details('eventSheet:sid:events'),
+      details('function:sid:spawn'),
+    ])
+    expect(currentNavigationEntry(history)).toEqual(details('function:sid:spawn'))
     expect(canForward(history)).toBe(false)
   })
 
-  it('does not add an identical entry for passive navigation', () => {
-    const entry = project('object:sid:player')
-    const history = initNavigationHistory(entry)
-
-    expect(pushNavigation(history, { ...entry })).toBe(history)
-    expect(history.entries).toHaveLength(1)
-  })
-
-  it('keeps the current history unchanged at either boundary', () => {
-    const initial = initNavigationHistory(project(null))
+  it('does not add identical entries and leaves history boundaries unchanged', () => {
+    const entry = details('object:sid:player')
+    const initial = initNavigationHistory(entry)
+    expect(pushNavigation(initial, { ...entry })).toBe(initial)
     expect(backNavigation(initial)).toBe(initial)
-
-    const end = pushNavigation(initial, project('object:sid:player'))
-    expect(forwardNavigation(end)).toBe(end)
+    expect(forwardNavigation(initial)).toBe(initial)
   })
 })

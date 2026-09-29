@@ -20,17 +20,17 @@ function diagnostic(severity: ProjectDiagnostic['severity']): ProjectDiagnostic 
 
 describe('workspaceNavigationTitle', () => {
   it('shows the resource view title even when an entity remains selected', () => {
-    expect(workspaceNavigationTitle('resources', 'Event sheet 1')).toBe('Project resources')
+    expect(workspaceNavigationTitle({ workspace: 'resources', resourcePath: null }, 'Event sheet 1')).toBe('Project resources')
   })
 
   it('uses the selected entity title in Project and the graph focus title in Graph', () => {
-    expect(workspaceNavigationTitle('project', 'Player')).toBe('Player')
-    expect(workspaceNavigationTitle('graph', 'SpawnEnemy')).toBe('SpawnEnemy')
+    expect(workspaceNavigationTitle({ workspace: 'project', entityId: 'player', view: 'details' }, 'Player')).toBe('Player')
+    expect(workspaceNavigationTitle({ workspace: 'project', entityId: 'spawn', view: 'graph' }, 'SpawnEnemy')).toBe('SpawnEnemy graph')
   })
 
   it('uses each workspace label when no entity is selected', () => {
-    expect(workspaceNavigationTitle('project')).toBe('Project overview')
-    expect(workspaceNavigationTitle('graph')).toBe('Relationship graph')
+    expect(workspaceNavigationTitle({ workspace: 'project', entityId: null, view: 'details' })).toBe('Project overview')
+    expect(workspaceNavigationTitle({ workspace: 'project', entityId: null, view: 'graph' })).toBe('Relationship graph')
   })
 })
 

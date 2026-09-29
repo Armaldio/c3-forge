@@ -1,4 +1,4 @@
-import type { ForgeEntity, ProjectAnalysis } from '../../core/types'
+import type { ForgeEntity, ManifestResource, ProjectAnalysis } from '../../core/types'
 
 export type ResourceGroup = 'Images' | 'Audio' | 'Fonts' | 'Videos' | 'Scripts' | 'Other files' | 'Add-ons' | 'Project source files'
 
@@ -12,7 +12,7 @@ export interface ProjectResourceItem {
 }
 
 export const RESOURCE_GROUPS: readonly ResourceGroup[] = [
-  'Images', 'Audio', 'Fonts', 'Videos', 'Scripts', 'Other files', 'Add-ons', 'Project source files',
+  'Images', 'Audio', 'Fonts', 'Videos', 'Scripts', 'Other files', 'Project source files', 'Add-ons',
 ]
 
 const imageExtensions = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'avif'])
@@ -22,42 +22,44 @@ const fontExtensions = new Set(['ttf', 'otf', 'woff', 'woff2'])
 const scriptExtensions = new Set(['js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx', 'css'])
 const textExtensions = new Set(['txt', 'json', 'xml', 'csv', 'md', 'html', 'yaml', 'yml', 'c3proj'])
 
+/** Construct source membership comes from the manifest kind, never from a .json suffix. */
 export function buildProjectResourceItems(analysis: ProjectAnalysis): readonly ProjectResourceItem[] {
-  const resources: ProjectResourceItem[] = (analysis.index.byKind.get('asset') ?? []).map((asset) => {
-    const extension = extensionOf(asset.sourcePath)
-    const category = String(asset.metadata.category ?? '').toLowerCase()
-    const group = category === 'script' || scriptExtensions.has(extension)
-      ? 'Scripts'
-      : groupForExtension(extension)
+  const resources: ProjectResourceItem[] = analysis.manifest.resources.map((resource) => {
+    const extension = extensionOf(resource.path)
+    const isConstructSource = resource.kind !== 'asset'
+    const group = isConstructSource
+      ? 'Project source files'
+      : groupForAsset(resource, extension)
     return {
-      navigationPath: asset.sourcePath,
-      name: basename(asset.sourcePath),
-      path: asset.sourcePath,
+      navigationPath: resource.path,
+      name: resource.name || basename(resource.path),
+      path: resource.path,
       group,
-      type: String(asset.metadata.type ?? asset.metadata.extension ?? (extension.toUpperCase() || 'File')),
+      type: isConstructSource
+        ? `${resource.kind} source`
+        : String(resource.metadata.type ?? resource.metadata.extension ?? (extension.toUpperCase() || 'File')),
     }
   })
 
-  resources.push({
-    navigationPath: 'project.c3proj',
-    name: 'project.c3proj',
-    path: 'project.c3proj',
-    group: 'Project source files',
-    type: 'C3 project',
-  })
-
-  for (const source of analysis.index.entities.filter((entity) => entity.kind === 'projectFile' && entity.sourcePath.toLowerCase().endsWith('.json'))) {
-    if (resources.some((resource) => resource.path === source.sourcePath)) continue
+  if (!resources.some((resource) => resource.path === analysis.manifest.projectFile)) {
     resources.push({
-      navigationPath: source.sourcePath,
-      name: basename(source.sourcePath),
-      path: source.sourcePath,
+      navigationPath: analysis.manifest.projectFile,
+      name: analysis.manifest.projectFile,
+      path: analysis.manifest.projectFile,
       group: 'Project source files',
-      type: 'JSON project source',
+      type: 'C3 project',
     })
   }
 
-  for (const addon of analysis.index.byKind.get('addon') ?? []) {
+  const addons: { id: string; name: string; metadata: ForgeEntity['metadata'] }[] = analysis.manifest.addons.length > 0
+    ? analysis.manifest.addons.map((addon) => ({
+        id: addon.id,
+        name: addon.name,
+        metadata: { ...addon.metadata, ...(addon.version ? { version: addon.version } : {}) } as ForgeEntity['metadata'],
+      }))
+    : (analysis.index.byKind.get('addon') ?? []).map((addon) => ({ id: addon.id, name: addon.name, metadata: addon.metadata }))
+
+  for (const addon of addons) {
     resources.push({
       navigationPath: `addon:${addon.id}`,
       name: addon.name,
@@ -75,12 +77,13 @@ export function isTextResource(item: ProjectResourceItem): boolean {
   return item.group === 'Scripts' || textExtensions.has(extensionOf(item.path))
 }
 
-function groupForExtension(extension: string): ResourceGroup {
-  if (imageExtensions.has(extension)) return 'Images'
-  if (audioExtensions.has(extension)) return 'Audio'
-  if (videoExtensions.has(extension)) return 'Videos'
-  if (fontExtensions.has(extension)) return 'Fonts'
-  if (extension === 'json' || extension === 'c3proj') return 'Project source files'
+function groupForAsset(resource: ManifestResource, extension: string): ResourceGroup {
+  const category = String(resource.metadata.category ?? '').toLowerCase()
+  if (category.includes('script') || scriptExtensions.has(extension)) return 'Scripts'
+  if (category.includes('image') || imageExtensions.has(extension)) return 'Images'
+  if (category.includes('sound') || category.includes('music') || audioExtensions.has(extension)) return 'Audio'
+  if (category.includes('video') || videoExtensions.has(extension)) return 'Videos'
+  if (category.includes('font') || fontExtensions.has(extension)) return 'Fonts'
   return 'Other files'
 }
 
