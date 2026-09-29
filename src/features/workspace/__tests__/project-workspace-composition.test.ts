@@ -95,14 +95,18 @@ async function renderWorkspace(navigationEntry: NavigationEntry): Promise<string
   }))
 }
 
+function indexOfClass(html: string, className: string): number {
+  return html.search(new RegExp(`class="[^"]*\\b${className}\\b`))
+}
+
 describe('Project workspace composition', () => {
   it('places primary workspace navigation before and outside the Project layout', async () => {
     const html = await renderWorkspace({ workspace: 'project', entityId: null, view: 'details' })
-    const navigationStart = html.indexOf('class="workspace-navigation"')
+    const navigationStart = indexOfClass(html, 'workspace-navigation')
     const navigationEnd = html.indexOf('</nav>', navigationStart)
     const navigation = html.slice(navigationStart, navigationEnd)
-    const projectStart = html.indexOf('class="project-workspace-layout"')
-    const mainStart = html.indexOf('class="project-main"')
+    const projectStart = indexOfClass(html, 'project-workspace-layout')
+    const mainStart = indexOfClass(html, 'project-main')
 
     expect(navigationStart).toBeGreaterThanOrEqual(0)
     expect(navigation).toContain('Project')
@@ -114,41 +118,41 @@ describe('Project workspace composition', () => {
     expect(html).toContain('aria-current="page"')
     expect(html).toContain('Overview')
     expect(html).toContain('Graph')
-    expect(html).toContain('class="explorer-pane"')
+    expect(html).toMatch(/class="[^"]*\bexplorer-pane\b/)
   })
 
   it('keeps contextual tabs and the explorer visible for an entity graph', async () => {
     const start = analysis.index.byKind.get('layout')?.[0]
     if (!start) throw new Error('Expected the composition fixture to contain a layout.')
     const html = await renderWorkspace({ workspace: 'project', entityId: start.id, view: 'graph' })
-    const tabStart = html.indexOf('class="project-context-tabs"')
+    const tabStart = indexOfClass(html, 'project-context-tabs')
     const tabEnd = html.indexOf('</nav>', tabStart)
     const tabs = html.slice(tabStart, tabEnd)
 
     expect(tabStart).toBeGreaterThanOrEqual(0)
     expect(tabs).toContain('Details')
     expect(tabs).toContain('Graph')
-    expect(html).toContain('class="explorer-pane"')
-    expect(html).toContain('class="relationship-graph"')
+    expect(html).toMatch(/class="[^"]*\bexplorer-pane\b/)
+    expect(html).toMatch(/class="[^"]*\brelationship-graph\b/)
     expect(html).not.toContain('class="workspace-navigation-title"')
   })
 
   it('renders Resources as a full-width sibling without Project context', async () => {
     const html = await renderWorkspace({ workspace: 'resources', resourcePath: null })
-    const resourcesStart = html.indexOf('class="resources-workspace"')
+    const resourcesStart = indexOfClass(html, 'resources-workspace')
 
     expect(resourcesStart).toBeGreaterThanOrEqual(0)
-    expect(html).toContain('class="workspace-navigation"')
+    expect(html).toMatch(/class="[^"]*\bworkspace-navigation\b/)
     expect(html).toContain('aria-current="page"')
-    expect(html.slice(resourcesStart)).toContain('class="resources-view"')
-    expect(html).not.toContain('class="project-workspace-layout"')
-    expect(html).not.toContain('class="explorer-pane"')
-    expect(html).not.toContain('class="project-context-tabs"')
-    expect(html).not.toContain('class="entity-view"')
-    expect(html).not.toContain('class="entity-breadcrumb"')
+    expect(html.slice(resourcesStart)).toMatch(/class="[^"]*\bresources-view\b/)
+    expect(html).not.toMatch(/class="[^"]*\bproject-workspace-layout\b/)
+    expect(html).not.toMatch(/class="[^"]*\bexplorer-pane\b/)
+    expect(html).not.toMatch(/class="[^"]*\bproject-context-tabs\b/)
+    expect(html).not.toMatch(/class="[^"]*\bentity-view\b/)
+    expect(html).not.toMatch(/class="[^"]*\bentity-breadcrumb\b/)
     expect(html).not.toContain('class="workspace-navigation-title"')
     expect(html).not.toContain('workspace-panel-resources')
-    expect(html).toMatch(/<h2[^>]*>Resources<\/h2>/)
+    expect(html).toMatch(/<h2[^>]*>\s*Resources\s*<\/h2>/)
   })
 
   it('keeps every rendered aria-labelledby target in the document', async () => {

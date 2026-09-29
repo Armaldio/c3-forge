@@ -160,37 +160,39 @@ onUnmounted(() => {
 
 <template>
   <section
-    class="resources-view"
+    class="resources-view grid h-full min-h-[34rem] w-full min-w-0 grid-cols-[minmax(15rem,21rem)_minmax(0,1fr)] overflow-hidden rounded-xl border border-line bg-[#111a23] text-text max-[760px]:h-auto max-[760px]:grid-cols-1"
     aria-label="Project resources"
   >
     <aside
-      class="resource-browser"
+      class="resource-browser min-w-0 overflow-auto border-r border-line p-4 max-[760px]:max-h-[23rem] max-[760px]:border-r-0 max-[760px]:border-b"
       aria-label="Resource list"
     >
-      <div class="resource-list-header">
+      <div class="resource-list-header flex items-center justify-between gap-4">
         <div>
-          <p class="resource-eyebrow">
+          <p class="resource-eyebrow m-0 text-[.7rem] font-bold uppercase tracking-[.09em] text-text-muted">
             Global project view
           </p>
-          <h2>Resources</h2>
+          <h2 class="mt-[.2rem] mb-0 text-[1.05rem]">
+            Resources
+          </h2>
         </div>
-        <span class="resource-count">{{ items.length }}</span>
+        <span class="resource-count text-xs text-text-muted">{{ items.length }}</span>
       </div>
       <label
-        class="resource-search-label"
+        class="resource-search-label mt-4 mb-[.35rem] block text-xs text-text-muted"
         for="resource-search"
       >Search resources</label>
       <input
         id="resource-search"
         v-model="query"
-        class="resource-search"
+        class="resource-search w-full rounded-[.4rem] border border-[#344154] bg-[#192231] px-[.65rem] py-[.55rem] text-[.82rem] text-text focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2"
         type="search"
         placeholder="Name or path"
         autocomplete="off"
       >
       <div
         v-if="visibleGroups.length"
-        class="resource-groups"
+        class="resource-groups mt-5 grid gap-[1.1rem]"
       >
         <section
           v-for="group in visibleGroups"
@@ -198,21 +200,23 @@ onUnmounted(() => {
           class="resource-group"
           :aria-label="group"
         >
-          <h3>{{ group }} <span>{{ filteredItems.filter((item) => item.group === group).length }}</span></h3>
-          <ul>
+          <h3 class="m-0 mb-[.35rem] flex justify-between text-[.72rem] uppercase tracking-[.07em] text-text-muted">
+            {{ group }} <span class="font-medium">{{ filteredItems.filter((item) => item.group === group).length }}</span>
+          </h3>
+          <ul class="m-0 grid list-none gap-[.15rem] p-0">
             <li
               v-for="item in filteredItems.filter((resource) => resource.group === group)"
               :key="item.navigationPath"
             >
               <button
-                class="resource-row"
-                :class="{ 'is-selected': selectedId === item.navigationPath }"
+                class="resource-row flex w-full cursor-pointer items-center gap-2 rounded-[.4rem] border border-transparent bg-transparent p-2 text-left text-inherit hover:bg-[#192231] focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2"
+                :class="{ 'is-selected border-accent bg-[#1d3048]': selectedId === item.navigationPath }"
                 type="button"
                 :aria-pressed="selectedId === item.navigationPath"
                 @click="requestItem(item)"
               >
-                <span class="resource-row-copy"><strong>{{ item.name }}</strong><small>{{ item.path }}</small></span>
-                <span class="resource-type">{{ item.type }}</span>
+                <span class="resource-row-copy grid min-w-0 flex-1 gap-[.15rem]"><strong class="truncate text-[.8rem] font-semibold">{{ item.name }}</strong><small class="truncate text-[.68rem] text-text-muted">{{ item.path }}</small></span>
+                <span class="resource-type shrink-0 text-[.68rem] text-text-muted">{{ item.type }}</span>
               </button>
             </li>
           </ul>
@@ -220,7 +224,7 @@ onUnmounted(() => {
       </div>
       <p
         v-else
-        class="resource-empty"
+        class="resource-empty mt-[1.2rem] text-[.82rem] text-text-muted"
         role="status"
       >
         {{ query ? 'No resources match this search.' : 'No project resources found.' }}
@@ -228,122 +232,109 @@ onUnmounted(() => {
     </aside>
 
     <section
-      class="resource-preview"
+      class="resource-preview min-w-0 overflow-auto p-5 max-[760px]:min-h-[18rem]"
       aria-label="Resource preview"
       aria-live="polite"
     >
       <template v-if="selectedItem">
-        <header class="preview-heading">
+        <header class="preview-heading flex items-center justify-between gap-4 border-b border-line pb-[.9rem]">
           <div>
-            <p class="resource-eyebrow">
+            <p class="resource-eyebrow m-0 text-[.7rem] font-bold uppercase tracking-[.09em] text-text-muted">
               {{ selectedItem.group }}
-            </p><h2>{{ selectedItem.name }}</h2>
+            </p><h2 class="mt-[.2rem] mb-0 break-words text-[1.05rem]">
+              {{ selectedItem.name }}
+            </h2>
           </div>
           <span
             v-if="preview?.size !== undefined"
-            class="preview-size"
+            class="preview-size text-xs text-text-muted"
           >{{ formatSize(preview.size) }}</span>
         </header>
-        <dl class="resource-metadata">
-          <div><dt>Path</dt><dd>{{ selectedItem.path }}</dd></div>
-          <div><dt>Type</dt><dd>{{ selectedItem.type }}</dd></div>
-          <div v-if="imageDimensions">
-            <dt>Dimensions</dt><dd>{{ imageDimensions }}</dd>
+        <dl class="resource-metadata my-4 grid grid-cols-[repeat(auto-fit,minmax(8rem,1fr))] gap-x-4 gap-y-3">
+          <div class="min-w-0">
+            <dt class="text-[.68rem] text-text-muted">
+              Path
+            </dt><dd class="mt-[.2rem] mb-0 break-words text-[.78rem]">
+              {{ selectedItem.path }}
+            </dd>
+          </div>
+          <div class="min-w-0">
+            <dt class="text-[.68rem] text-text-muted">
+              Type
+            </dt><dd class="mt-[.2rem] mb-0 break-words text-[.78rem]">
+              {{ selectedItem.type }}
+            </dd>
+          </div>
+          <div
+            v-if="imageDimensions"
+            class="min-w-0"
+          >
+            <dt class="text-[.68rem] text-text-muted">
+              Dimensions
+            </dt><dd class="mt-[.2rem] mb-0 break-words text-[.78rem]">
+              {{ imageDimensions }}
+            </dd>
           </div>
         </dl>
         <p
           v-if="loading"
-          class="preview-message"
+          class="preview-message rounded-[.4rem] bg-[#192231] p-[.85rem] text-[.82rem] text-text-muted"
           role="status"
         >
           Loading preview…
         </p>
         <p
           v-else-if="failure"
-          class="preview-error"
+          class="preview-error rounded-[.4rem] bg-[#192231] p-[.85rem] text-[.82rem] text-[#ff9c9c]"
           role="alert"
         >
           {{ failure }}
         </p>
         <p
           v-else-if="preview?.message"
-          class="preview-message"
+          class="preview-message rounded-[.4rem] bg-[#192231] p-[.85rem] text-[.82rem] text-text-muted"
         >
           {{ preview.message }}
         </p>
         <img
           v-else-if="preview?.kind === 'image' && preview.url"
-          class="image-preview"
+          class="image-preview mx-auto my-4 block max-h-[min(65vh,48rem)] max-w-full bg-[#0b0f16] object-contain"
           :src="preview.url"
           :alt="selectedItem.name"
           @load="updateImageDimensions"
         >
         <audio
           v-else-if="preview?.kind === 'audio' && preview.url"
-          class="media-preview"
+          class="media-preview mx-auto my-8 block w-[min(100%,48rem)]"
           :src="preview.url"
           controls
           preload="none"
         >Audio preview is not supported by this browser.</audio>
         <video
           v-else-if="preview?.kind === 'video' && preview.url"
-          class="media-preview"
+          class="media-preview mx-auto my-8 block w-[min(100%,48rem)]"
           :src="preview.url"
           controls
           preload="none"
         >Video preview is not supported by this browser.</video>
         <pre
           v-else-if="preview?.kind === 'text'"
-          class="text-preview"
+          class="text-preview m-0 max-h-[65vh] overflow-auto whitespace-pre-wrap break-words rounded-[.45rem] border border-line bg-[#192231] p-4 font-mono text-[.78rem] leading-[1.5] text-text"
         >{{ preview.text }}</pre>
       </template>
       <div
         v-else
-        class="preview-placeholder"
+        class="preview-placeholder grid min-h-[25rem] content-center justify-items-center p-8 text-center text-text-muted"
       >
-        <span aria-hidden="true">▧</span><h2>Select a resource</h2><p>Choose a file to inspect its metadata and preview supported formats.</p>
+        <span
+          class="text-[2rem] text-accent"
+          aria-hidden="true"
+        >▧</span><h2 class="mt-[.2rem] mb-0 text-[1.05rem]">
+          Select a resource
+        </h2><p class="max-w-[23rem] text-[.82rem] leading-[1.5]">
+          Choose a file to inspect its metadata and preview supported formats.
+        </p>
       </div>
     </section>
   </section>
 </template>
-
-<style scoped>
-.resources-view { display: grid; grid-template-columns: minmax(15rem, 21rem) minmax(0, 1fr); min-height: 34rem; height: 100%; color: var(--text-primary, #e8edf5); background: var(--surface, #111722); border: 1px solid var(--border, #283242); border-radius: .75rem; overflow: hidden; }
-.resource-browser { min-width: 0; padding: 1rem; border-right: 1px solid var(--border, #283242); overflow: auto; }
-.resource-list-header, .preview-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
-.resource-list-header h2, .preview-heading h2, .preview-placeholder h2 { margin: .2rem 0 0; font-size: 1.05rem; }
-.resource-eyebrow { margin: 0; color: var(--text-muted, #94a0b2); font-size: .7rem; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; }
-.resource-count, .preview-size { color: var(--text-muted, #94a0b2); font-size: .75rem; }
-.resource-search-label { display: block; margin: 1rem 0 .35rem; color: var(--text-muted, #aab5c4); font-size: .75rem; }
-.resource-search { box-sizing: border-box; width: 100%; padding: .55rem .65rem; color: inherit; background: var(--surface-raised, #192231); border: 1px solid var(--border, #344154); border-radius: .4rem; font: inherit; font-size: .82rem; }
-.resource-search:focus-visible, .resource-row:focus-visible { outline: 2px solid var(--accent, #77b7ff); outline-offset: 2px; }
-.resource-groups { display: grid; gap: 1.1rem; margin-top: 1.25rem; }
-.resource-group h3 { display: flex; justify-content: space-between; margin: 0 0 .35rem; color: var(--text-muted, #9ca9bb); font-size: .72rem; letter-spacing: .07em; text-transform: uppercase; }
-.resource-group h3 span { font-weight: 500; }
-.resource-group ul { display: grid; gap: .15rem; margin: 0; padding: 0; list-style: none; }
-.resource-row { display: flex; width: 100%; align-items: center; gap: .5rem; padding: .5rem; color: inherit; text-align: left; background: transparent; border: 1px solid transparent; border-radius: .4rem; cursor: pointer; }
-.resource-row:hover { background: var(--surface-raised, #192231); }
-.resource-row.is-selected { background: var(--selection, #1d3048); border-color: var(--accent, #427cb6); }
-.resource-row-copy { display: grid; min-width: 0; flex: 1; gap: .15rem; }
-.resource-row-copy strong, .resource-row-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.resource-row-copy strong { font-size: .8rem; font-weight: 600; }
-.resource-row-copy small, .resource-type { color: var(--text-muted, #929fb1); font-size: .68rem; }
-.resource-type { flex-shrink: 0; }
-.resource-empty { margin-top: 1.2rem; color: var(--text-muted, #9ca9bb); font-size: .82rem; }
-.resource-preview { min-width: 0; padding: 1.25rem; overflow: auto; }
-.preview-heading { padding-bottom: .9rem; border-bottom: 1px solid var(--border, #283242); }
-.preview-heading h2 { overflow-wrap: anywhere; }
-.resource-metadata { display: grid; grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr)); gap: .75rem 1rem; margin: 1rem 0; }
-.resource-metadata div { min-width: 0; }
-.resource-metadata dt { color: var(--text-muted, #9ca9bb); font-size: .68rem; }
-.resource-metadata dd { overflow-wrap: anywhere; margin: .2rem 0 0; font-size: .78rem; }
-.image-preview { display: block; max-width: 100%; max-height: min(65vh, 48rem); margin: 1rem auto; object-fit: contain; background: #0b0f16; }
-.media-preview { display: block; width: min(100%, 48rem); margin: 2rem auto; }
-.text-preview { max-height: 65vh; overflow: auto; margin: 0; padding: 1rem; color: var(--text-primary, #e8edf5); background: var(--surface-raised, #192231); border: 1px solid var(--border, #283242); border-radius: .45rem; font: .78rem/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
-.preview-message, .preview-error { padding: .85rem; color: var(--text-muted, #9ca9bb); background: var(--surface-raised, #192231); border-radius: .4rem; font-size: .82rem; }
-.preview-error { color: var(--danger, #ff9c9c); }
-.preview-placeholder { display: grid; min-height: 25rem; align-content: center; justify-items: center; padding: 2rem; color: var(--text-muted, #9ca9bb); text-align: center; }
-.preview-placeholder > span { color: var(--accent, #77b7ff); font-size: 2rem; }
-.preview-placeholder p { max-width: 23rem; font-size: .82rem; line-height: 1.5; }
-@media (max-width: 760px) { .resources-view { grid-template-columns: minmax(0, 1fr); height: auto; } .resource-browser { max-height: 23rem; border-right: 0; border-bottom: 1px solid var(--border, #283242); } .resource-preview { min-height: 18rem; } }
-</style>
