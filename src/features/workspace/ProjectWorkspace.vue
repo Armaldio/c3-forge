@@ -10,7 +10,7 @@ import ProjectDiagnostics from './ProjectDiagnostics.vue'
 import ProjectOverview from './ProjectOverview.vue'
 import RelationshipGraph from './RelationshipGraph.vue'
 import ResourcesView from './ResourcesView.vue'
-import { loadStageLabel, summarizeProjectDiagnostics, workspaceNavigationTitle } from './presentation'
+import { loadStageLabel, summarizeProjectDiagnostics } from './presentation'
 
 const props = defineProps<{
   analysis: ProjectAnalysis | null
@@ -63,11 +63,6 @@ const graphFocusEntityId = computed(() => props.navigationEntry.workspace === 'p
 const resourcePath = computed(() => props.navigationEntry.workspace === 'resources' ? props.navigationEntry.resourcePath : null)
 const explorerSelectedEntityId = computed(() => {
   return props.navigationEntry.workspace === 'project' ? props.navigationEntry.entityId : null
-})
-const navigationTitle = computed(() => {
-  const focusId = props.navigationEntry.workspace === 'project' ? props.navigationEntry.entityId : null
-  const entity = focusId ? props.analysis?.index.byId.get(focusId) : undefined
-  return workspaceNavigationTitle(props.navigationEntry, entity?.name)
 })
 const diagnosticSummary = computed(() => summarizeProjectDiagnostics(props.analysis?.diagnostics ?? []))
 watch(() => diagnosticSummary.value.total, (total) => {
@@ -294,75 +289,66 @@ function handleArchiveSelection(event: Event): void {
       </div>
 
       <template v-if="analysis">
+        <nav
+          class="workspace-navigation"
+          aria-label="Workspaces"
+        >
+          <div
+            class="workspace-history-controls"
+            role="group"
+            aria-label="Navigation history"
+          >
+            <button
+              type="button"
+              aria-label="Go back"
+              title="Go back"
+              :disabled="!canNavigateBack"
+              @click="emit('navigate-back')"
+            >
+              ←
+            </button>
+            <button
+              type="button"
+              aria-label="Go forward"
+              title="Go forward"
+              :disabled="!canNavigateForward"
+              @click="emit('navigate-forward')"
+            >
+              →
+            </button>
+          </div>
+          <div class="workspace-primary-navigation">
+            <button
+              type="button"
+              :aria-current="activeWorkspace === 'project' ? 'page' : undefined"
+              @click="emit('navigate-project-root')"
+            >
+              Project
+            </button>
+            <button
+              type="button"
+              :aria-current="activeWorkspace === 'resources' ? 'page' : undefined"
+              @click="selectWorkspace('resources')"
+            >
+              Resources
+            </button>
+          </div>
+        </nav>
+
         <section
-          class="workspace-layout"
-          :class="{ 'workspace-layout--resources': activeWorkspace === 'resources' }"
+          v-if="activeWorkspace === 'project'"
+          id="project-workspace"
+          class="project-workspace-layout"
           aria-label="Project workspace"
         >
           <EntityExplorer
-            v-if="activeWorkspace === 'project'"
             ref="explorer"
             :analysis="analysis"
             :selected-entity-id="explorerSelectedEntityId"
             @select="emit('select-entity', $event)"
           />
-          <div class="main-column">
-            <div class="workspace-navigation-bar">
-              <div
-                class="workspace-history-controls"
-                aria-label="Navigation history"
-              >
-                <button
-                  type="button"
-                  aria-label="Go back"
-                  title="Go back"
-                  :disabled="!canNavigateBack"
-                  @click="emit('navigate-back')"
-                >
-                  ←
-                </button>
-                <button
-                  type="button"
-                  aria-label="Go forward"
-                  title="Go forward"
-                  :disabled="!canNavigateForward"
-                  @click="emit('navigate-forward')"
-                >
-                  →
-                </button>
-              </div>
-              <nav
-                class="workspace-view-tabs"
-                role="tablist"
-                aria-label="Workspaces"
-              >
-                <button
-                  id="workspace-tab-project-workspace"
-                  type="button"
-                  role="tab"
-                  :aria-selected="activeWorkspace === 'project'"
-                  aria-controls="workspace-panel-project-details"
-                  @click="selectWorkspace('project')"
-                >
-                  Project
-                </button>
-                <button
-                  id="workspace-tab-resources-workspace"
-                  type="button"
-                  role="tab"
-                  :aria-selected="activeWorkspace === 'resources'"
-                  aria-controls="workspace-panel-resources"
-                  @click="selectWorkspace('resources')"
-                >
-                  Resources
-                </button>
-              </nav>
-              <h1 class="workspace-navigation-title">
-                {{ navigationTitle }}
-              </h1>
-            </div>
+          <div class="project-main">
             <nav
-              v-if="activeWorkspace === 'project'"
               class="project-context-tabs"
               role="tablist"
               :aria-label="projectEntityId ? 'Entity views' : 'Project views'"
@@ -389,7 +375,7 @@ function handleArchiveSelection(event: Event): void {
               </button>
             </nav>
             <section
-              v-show="activeWorkspace === 'project' && projectView === 'details'"
+              v-show="projectView === 'details'"
               id="workspace-panel-project-details"
               class="workspace-view-panel"
               role="tabpanel"
@@ -410,7 +396,7 @@ function handleArchiveSelection(event: Event): void {
               />
             </section>
             <section
-              v-show="activeWorkspace === 'project' && projectView === 'graph'"
+              v-show="projectView === 'graph'"
               id="workspace-panel-graph"
               class="workspace-view-panel"
               role="tabpanel"
@@ -424,22 +410,21 @@ function handleArchiveSelection(event: Event): void {
                 @update:graph-focus-entity-id="emit('graph-focus-change', $event)"
               />
             </section>
-            <section
-              v-show="activeWorkspace === 'resources'"
-              id="workspace-panel-resources"
-              class="workspace-view-panel"
-              role="tabpanel"
-              aria-labelledby="workspace-tab-resources"
-            >
-              <ResourcesView
-                v-if="activeWorkspace === 'resources' && analysis && filesystem"
-                :analysis="analysis"
-                :filesystem="filesystem"
-                :resource-path="resourcePath"
-                @select-resource="emit('select-resource', $event)"
-              />
-            </section>
           </div>
+        </section>
+
+        <section
+          v-else
+          class="resources-workspace"
+          aria-label="Resources workspace"
+        >
+          <ResourcesView
+            v-if="filesystem"
+            :analysis="analysis"
+            :filesystem="filesystem"
+            :resource-path="resourcePath"
+            @select-resource="emit('select-resource', $event)"
+          />
         </section>
 
         <div class="workspace-statusbar">
